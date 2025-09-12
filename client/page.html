@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lintasan A/B Dashboard</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Font Awesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            overflow: hidden;
+            background-color: #f3f4f6;
+        }
+        /* Custom styles for rotated text in sidebar */
+        .sidebar-brand-text {
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+        }
+        /* Custom radio button styling */
+        input[type="radio"] {
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            display: inline-block;
+            width: 1.5rem;
+            height: 1.5rem;
+            border-radius: 50%;
+            border: 2px solid #D1D5DB;
+            cursor: pointer;
+            outline: none;
+            position: relative;
+            transition: all 0.2s ease-in-out;
+        }
+        input[type="radio"]:checked {
+            border-color: #EF4444;
+        }
+        input[type="radio"]:checked::before {
+            content: '';
+            display: block;
+            width: 0.75rem;
+            height: 0.75rem;
+            border-radius: 50%;
+            background-color: #EF4444;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+        input[type="radio"].start-radio:checked {
+            border-color: #DC2626;
+        }
+        input[type="radio"].start-radio:checked::before {
+            background-color: #DC2626;
+        }
+        input[type="radio"].finish-radio:checked {
+            border-color: #6B7280;
+        }
+        input[type="radio"].finish-radio:checked::before {
+            background-color: #6B7280;
+        }
+        input[type="radio"].belum-mulai-radio:checked {
+            border-color: #F59E0B;
+        }
+        input[type="radio"].belum-mulai-radio:checked::before {
+            background-color: #F59E0B;
+        }
+        input[type="radio"].perjalanan-radio:checked {
+            border-color: #10B981;
+        }
+        input[type="radio"].perjalanan-radio:checked::before {
+            background-color: #10B981;
+        }
+
+        /* The container for the entire app layout, which will be scaled */
+        #desktop-app-wrapper {
+            position: absolute;
+            transform-origin: top left;
+        }
+
+        /* Active sidebar button style */
+        .sidebar-button.active {
+            background-color: #ef4444;
+            color: #ffffff;
+        }
+
+        /* Custom scrollbar styling for the photo entries area */
+        #photo-entries-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        #photo-entries-container::-webkit-scrollbar-track {
+            background: #e5e7eb;
+            border-radius: 4px;
+        }
+        #photo-entries-container::-webkit-scrollbar-thumb {
+            background-color: #ef4444;
+            border-radius: 4px;
+            border: 2px solid #e5e7eb;
+        }
+        /* Firefox scrollbar styling */
+        #photo-entries-container {
+            scrollbar-width: thin;
+            scrollbar-color: #ef4444 #e5e7eb;
+        }
+
+        /* Custom spinner animation */
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #fff;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+
+        /* Compass image rotation styling */
+        #compass-image-container {
+            transform-origin: center center;
+            transition: transform 0.3s ease-out;
+        }
+
+        /* Restart Confirmation Popup Styling - Fixed positioning */
+        #restart-popup-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000; /* Higher z-index to ensure it's on top */
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+        #restart-popup-overlay.visible {
+            visibility: visible;
+            opacity: 1;
+        }
+        #restart-popup {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+            z-index: 1001;
+        }
+
+        /* Styling untuk video streaming */
+        .video-container {
+            position: relative;
+            background-color: #000;
+            overflow: hidden;
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .video-container video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .stream-status {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            z-index: 10;
+        }
+        .status-live {
+            background-color: #EF4444;
+            color: white;
+        }
+        .status-offline {
+            background-color: #6B7280;
+            color: white;
+        }
+        .status-connecting {
+            background-color: #F59E0B;
+            color: white;
+        }
+        .video-placeholder {
+            color: white;
+            text-align: center;
+            padding: 1rem;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="desktop-app-wrapper">
+        <div class="w-[1701px] h-[1024px] relative bg-white overflow-hidden">
+            <!-- Main Content Area - This area will contain dynamic content for Dashboard/Daftar Foto -->
+            <div id="dashboard-page" class="absolute inset-0">
+                <!-- Kamera Atas - Diubah dari placeholder ke video streaming -->
+                <div class="w-96 h-64 left-[1199px] top-[55.07px] absolute rounded-lg overflow-hidden video-container">
+                    <video id="kamera-atas-video" autoplay muted playsinline>
+                        Your browser does not support the video tag.
+                    </video>
+                    <div class="stream-status status-connecting" id="kamera-atas-status">
+                        <i class="fas fa-circle-notch fa-spin mr-1"></i> Menyambungkan
+                    </div>
+                    <div class="video-placeholder" id="kamera-atas-placeholder">
+                        <i class="fas fa-video text-3xl mb-2"></i>
+                        <p>Kamera Atas</p>
+                    </div>
+                </div>
+                <div class="w-36 h-6 left-[1199px] top-[31px] absolute text-black text-xl font-normal font-['Inter']">Kamera Atas</div>
+                
+                <!-- Peta Arena Lintasan (Trajectory) -->
+                <div class="w-[501px] h-80 left-[1142px] top-[684.06px] absolute bg-zinc-300 rounded-lg"></div>
+                <div class="w-[539px] h-7 left-[1142px] top-[655px] absolute text-black text-xl font-normal font-['Inter']">Peta Arena Lintasan (Trajectory)</div>
+                
+                <!-- Kamera Bawah - Diubah dari placeholder ke video streaming -->
+                <div class="w-96 h-64 left-[1199px] top-[353.75px] absolute rounded-lg overflow-hidden video-container">
+                    <video id="kamera-bawah-video" autoplay muted playsinline>
+                        Your browser does not support the video tag.
+                    </video>
+                    <div class="stream-status status-connecting" id="kamera-bawah-status">
+                        <i class="fas fa-circle-notch fa-spin mr-1"></i> Menyambungkan
+                    </div>
+                    <div class="video-placeholder" id="kamera-bawah-placeholder">
+                        <i class="fas fa-video text-3xl mb-2"></i>
+                        <p>Kamera Bawah</p>
+                    </div>
+                </div>
+                <div class="w-44 h-6 left-[1199px] top-[330.30px] absolute text-black text-xl font-normal font-['Inter']">Kamera Bawah</div>
+                
+                <!-- Trajectory Visualisizer -->
+                <div class="w-[590px] h-96 left-[261px] top-[75px] absolute bg-zinc-300 rounded-lg flex items-center justify-center text-gray-500 text-xl font-semibold">Trajectory Visualisizer</div>
+                <div class="w-52 left-[285px] top-[530px] absolute text-black text-3xl font-normal font-['Inter']">GPS</div>
+                <div class="left-[237px] top-[578px] absolute text-black text-base font-normal font-['Inter']">Langitude : <span id="gps-latitude">XXXXXXX</span></div>
+                <div class="left-[237px] top-[608px] absolute text-black text-base font-normal font-['Inter']">Longitude : <span id="gps-longitude">XXXXXXX</span></div>
+                <div class="w-44 left-[237px] top-[668px] absolute text-center text-black text-2xl font-normal font-['Inter']">Daya Batterai</div>
+                <div class="w-44 left-[232px] top-[698px] absolute text-center text-black text-2xl font-normal font-['Inter']"><span id="battery-level">76.7</span>%</div>
+
+                <div class="left-[261px] top-[740px] absolute text-center text-black text-2xl font-normal font-['Inter']">Tegangan </div>
+                <div class="left-[301px] top-[771px] absolute text-center text-black text-2xl font-normal font-['Inter']"><span id="voltage">5</span>V</div>
+
+                <div class="left-[291px] top-[815px] absolute text-center text-black text-2xl font-normal font-['Inter']">Arus</div>
+                <div class="left-[260px] top-[846px] absolute text-center text-black text-2xl font-normal font-['Inter']"><span id="current">0.34353</span>A</div>
+
+                <div class="w-44 left-[677px] top-[538px] absolute text-center text-black text-2xl font-normal font-['Inter']">SOG</div>
+                <div class="w-44 left-[672px] top-[568px] absolute text-center text-black text-2xl font-normal font-['Inter']"><span id="sog-knots">00</span> Knots</div>
+                <div class="w-44 left-[672px] top-[595px] absolute text-center text-black text-2xl font-normal font-['Inter']"><span id="sog-kmh">00</span> Km/h</div>
+
+                <div class="w-44 left-[673px] top-[640px] absolute text-center text-black text-2xl font-normal font-['Inter']">COG</div>
+                <div class="w-44 left-[675px] top-[669px] absolute text-center text-black text-2xl font-normal font-['Inter']"><span id="cog-knots">00</span> Knots</div>
+                <div class="w-44 left-[674px] top-[698px] absolute text-center text-black text-2xl font-normal font-['Inter']"><span id="cog-kmh">00</span> Km/h</div>
+
+                <div class="left-[492px] top-[794px] absolute text-black text-base font-normal font-['Inter']">Heading : <span id="heading-text">123°</span> </div>
+                <div class="w-52 left-[492px] top-[530px] absolute text-black text-3xl font-normal font-['Inter']">Kompas</div>
+                
+                <!-- Compass Image - now rotatable -->
+                <div id="compass-image-container" class="w-52 h-56 left-[437px] top-[577px] absolute flex items-center justify-center">
+                    <img id="compass-image" class="w-[217px] h-[217px]" src="Kompas.png" alt="Compass representation" />
+                </div>
+
+                <div id="lintasan-ab-header" class="left-[261px] top-[31px] absolute text-black text-4xl font-normal font-['Inter']">Lintasan A/B</div>
+                <div class="left-[421px] top-[247px] absolute text-center text-black text-2xl font-normal font-['Inter']">Trajectory Visualisizer</div>
+
+                <div class="left-[307px] top-[470px] absolute justify-start"><span class="text-black text-lg font-normal font-['Inter']">Waktu Mulai : </span><span class="text-red-600 text-lg font-normal font-['Inter']">Belum Mulai</span></div>
+                <div class="left-[550px] top-[470px] absolute justify-start"><span class="text-black text-lg font-normal font-['Inter']">Waktu Finish : </span><span class="text-red-600 text-lg font-normal font-['Inter']">Belum Sampai</span></div>
+                
+                <!-- Mode Lintasan (Trajectory Mode) - Changed to radio buttons with IDs -->
+                <div class="left-[926px] top-[99px] absolute text-black text-2xl font-normal font-['Inter']">Mode Lintasan</div>
+                <div class="absolute left-[970px] top-[158px] flex flex-col space-y-4">
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="radio" name="trajectory_mode" value="A" id="trajectory-mode-a" class="form-radio" checked>
+                        <span class="ml-3 text-black text-2xl font-normal font-['Inter']">A</span>
+                    </label>
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="radio" name="trajectory_mode" value="B" id="trajectory-mode-b" class="form-radio">
+                        <span class="ml-3 text-black text-2xl font-normal font-['Inter']">B</span>
+                    </label>
+                </div>
+
+                <!-- Keadaan Sekarang (Current State) - Updated radio buttons with IDs -->
+                <div class="left-[904px] top-[444px] absolute text-center text-black text-2xl font-normal font-['Inter']">Keadaan Sekarang</div>
+                <div class="absolute left-[970px] top-[492px] flex flex-col space-y-4">
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="radio" name="current_state" value="Belum Mulai" id="current-state-belum-mulai" class="form-radio belum-mulai-radio" checked>
+                        <span class="ml-3 text-black text-2xl font-normal font-['Inter']">Belum Mulai</span>
+                    </label>
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="radio" name="current_state" value="Start" id="current-state-start" class="form-radio start-radio">
+                        <span class="ml-3 text-black text-2xl font-normal font-['Inter']">Start</span>
+                    </label>
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="radio" name="current_state" value="Perjalanan" id="current-state-perjalanan" class="form-radio perjalanan-radio">
+                        <span class="ml-3 text-black text-2xl font-normal font-['Inter']">Perjalanan</span>
+                    </label>
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="radio" name="current_state" value="Finish" id="current-state-finish" class="form-radio finish-radio">
+                        <span class="ml-3 text-black text-2xl font-normal font-['Inter']">Finish</span>
+                    </label>
+                </div>
+                
+                <!-- Restart Button - Changed to an actual button element -->
+                <button id="restart-btn" class="w-36 h-14 left-[927px] top-[781px] absolute bg-blue-600 text-white rounded-[20px] flex items-center justify-center text-2xl font-bold hover:bg-blue-700 transition-colors">
+                    <i class="fas fa-redo-alt mr-2"></i> Restart
+                </button>
+
+                <!-- Refresh Data Button -->
+                <button id="refresh-data-btn" class="w-44 h-14 left-[927px] top-[850px] absolute bg-green-600 text-white rounded-[20px] flex items-center justify-center text-xl font-bold hover:bg-green-700 transition-colors">
+                    <i class="fas fa-sync-alt mr-2"></i> Refresh Data
+                </button>
+
+                <!-- Mulai Button -->
+                <button id="mulai-btn" class="w-36 h-14 left-[927px] top-[920px] absolute bg-purple-600 text-white rounded-[20px] flex items-center justify-center text-2xl font-bold hover:bg-purple-700 transition-colors">
+                    <i class="fas fa-play mr-2"></i> Mulai
+                </button>
+                
+                <div class="left-[185px] top-[957px] absolute text-black text-lg font-normal font-['Inter']">Log Kamera Atas     : <span id="log-kamera-atas">TipeLintasan_Atas_Hijau_Time.jpg</span></div>
+                <div class="left-[185px] top-[986px] absolute text-black text-lg font-normal font-['Inter']">Log Kamera Bawah : <span id="log-kamera-bawah">Menuggu....</span></div>
+            </div>
+
+            <div id="daftar-foto-page" class="absolute inset-0 hidden">
+                <!-- Daftar Foto Title -->
+                <div class="absolute left-[261px] top-[31px] text-black text-4xl font-normal font-['Inter']">Daftar Foto</div>
+
+                <!-- Photo Entries Container (with functional scrollbar) -->
+                <div id="photo-entries-container" class="absolute left-[261px] top-[100px] w-[800px] h-[850px] overflow-y-auto pr-4"> 
+                    <!-- First Image Entry -->
+                    <div class="w-full bg-white rounded-lg p-6 shadow-lg flex items-center mb-8">
+                        <div class="flex-1">
+                            <p class="text-black text-2xl font-normal font-['Inter'] mb-2"><span class="font-bold">Nama :</span> TipeLintasan_Atas_Hijau_Time.jpg</p>
+                            <p class="text-black text-2xl font-normal font-['Inter'] mb-2"><span class="font-bold">Waktu :</span> 13:45</p>
+                            <p class="text-black text-2xl font-normal font-['Inter'] mb-4"><span class="font-bold">Tanggal :</span> 15 Januari 2025</p>
+                            <button class="bg-blue-600 text-white py-2 px-6 rounded-lg font-bold hover:bg-blue-700 transition-colors">Download</button>
+                        </div>
+                        <div class="w-64 h-48 bg-gray-300 rounded-lg flex-shrink-0 ml-8"></div> <!-- Image Placeholder -->
+                    </div>
+
+                    <!-- Second Image Entry -->
+                    <div class="w-full bg-white rounded-lg p-6 shadow-lg flex items-center mb-8">
+                        <div class="flex-1">
+                            <p class="text-black text-2xl font-normal font-['Inter'] mb-2"><span class="font-bold">Nama :</span> TipeLintasan_Bawah_Hijau_Time.jpg</p>
+                            <p class="text-black text-2xl font-normal font-['Inter'] mb-2"><span class="font-bold">Waktu :</span> 13:45</p>
+                            <p class="text-black text-2xl font-normal font-['Inter'] mb-4"><span class="font-bold">Tanggal :</span> 15 Januari 2025</p>
+                            <button class="bg-blue-600 text-white py-2 px-6 rounded-lg font-bold hover:bg-blue-700 transition-colors">Download</button>
+                        </div>
+                        <div class="w-64 h-48 bg-gray-300 rounded-lg flex-shrink-0 ml-8"></div> <!-- Image Placeholder -->
+                    </div>
+
+                    <!-- Additional entries to make the scrollbar appear and be functional -->
+                    <div class="w-full bg-white rounded-lg p-6 shadow-lg flex items-center mb-8">
+                        <div class="flex-1">
+                            <p class="text-black text-2xl font-normal font-['Inter'] mb-2"><span class="font-bold">Nama :</span> TipeLintasan_Ketiga_Time.jpg</p>
+                            <p class="text-black text-2xl font-normal font-['Inter'] mb-2"><span class="font-bold">Waktu :</span> 14:00</p>
+                            <p class="text-black text-2xl font-normal font-['Inter'] mb-4"><span class="font-bold">Tanggal :</span> 15 Januari 2025</p>
+                            <button class="bg-blue-600 text-white py-2 px-6 rounded-lg font-bold hover:bg-blue-700 transition-colors">Download</button>
+                        </div>
+                        <div class="w-64 h-48 bg-gray-300 rounded-lg flex-shrink-0 ml-8"></div> <!-- Image Placeholder -->
+                    </div>
+                    <div class="w-full bg-white rounded-lg p-6 shadow-lg flex items-center mb-8">
+                        <div class="flex-1">
+                            <p class="text-black text-2xl font-normal font-['Inter'] mb-2"><span class="font-bold">Nama :</span> TipeLintasan_Keempat_Time.jpg</p>
+                            <p class="text-black text-2xl font-normal font-['Inter'] mb-2"><span class="font-bold">Waktu :</span> 14:15</p>
+                            <p class="text-black text-2xl font-normal font-['Inter'] mb-4"><span class="font-bold">Tanggal :</span> 15 Januari 2025</p>
+                            <button class="bg-blue-600 text-white py-2 px-6 rounded-lg font-bold hover:bg-blue-700 transition-colors">Download</button>
+                        </div>
+                        <div class="w-64 h-48 bg-gray-300 rounded-lg flex-shrink-0 ml-8"></div> <!-- Image Placeholder -->
+                    </div>
+                </div>
+
+                <!-- Removed the aesthetic scrollbar div -->
+            </div>
+
+            <!-- Sidebar - Aesthetic changes remain -->
+            <div class="w-36 h-[1024px] left-0 top-0 absolute bg-gray-800 rounded-lg p-4 flex flex-col justify-between shadow-lg text-white">
+                <div>
+                    <!-- Logo Section -->
+                    <div class="w-20 h-20 mx-auto mt-8 mb-4 bg-red-600 rounded-lg flex items-center justify-center">
+                        <i class="fas fa-ship text-3xl"></i>
+                    </div>
+
+                    <!-- Navigation Buttons -->
+                    <div class="space-y-4">
+                        <button id="dashboard-btn" class="sidebar-button w-full py-3 px-2 bg-red-500 rounded-lg flex flex-col items-center justify-center font-medium shadow-sm hover:bg-red-400 transition-colors active">
+                            <i class="fas fa-chart-line text-xl mb-1"></i> Dashboard
+                        </button>
+                        <button id="daftar-foto-btn" class="sidebar-button w-full py-3 px-2 bg-red-500 rounded-lg flex flex-col items-center justify-center font-medium shadow-sm hover:bg-red-400 transition-colors">
+                            <i class="fas fa-camera-retro text-xl mb-1"></i> Daftar foto
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Vertical Brand Text -->
+                <div class="relative w-full h-1/3">
+                    <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 transform origin-center text-xl font-bold text-gray-400 opacity-75 whitespace-nowrap">
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Popup kecil di pojok kanan bawah -->
+    <div id="loading-popup" class="absolute bottom-4 right-4 bg-blue-600 text-white p-4 rounded-lg shadow-xl flex items-center space-x-3 z-50 pointer-events-none">
+        <div class="spinner"></div>
+        <span>Berusaha Menyambung Ke Server....</span>
+    </div>
+
+    <!-- Restart Confirmation Popup - Moved outside the scaled wrapper -->
+    <div id="restart-popup-overlay">
+        <div id="restart-popup">
+            <p class="text-xl font-semibold text-gray-800 mb-6" id="restart-popup-message">
+                Apakah anda yakin ingin memulai dari awal di mode lintasan {mode_lintasan_placeholder}?
+            </p>
+            <div class="flex justify-center space-x-4">
+                <button id="restart-confirm-yes" class="bg-red-600 text-white py-2 px-6 rounded-lg font-bold hover:bg-red-700 transition-colors">Ya</button>
+                <button id="restart-confirm-no" class="bg-gray-300 text-gray-800 py-2 px-6 rounded-lg font-bold hover:bg-gray-400 transition-colors">Tidak</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * Mengatur skala dan posisi konten agar pas di dalam jendela browser
+         * tanpa menyebabkan scroll, mempertahankan rasio aspek.
+         * Konten akan menempel di sisi kiri dan terpusat secara vertikal.
+         */
+        function scaleContent() {
+            const wrapper = document.getElementById('desktop-app-wrapper');
+            const appWidth = 1701; // Lebar desain asli (piksel)
+            const appHeight = 1024; // Tinggi desain asli (piksel)
+
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
+
+            // Hitung faktor skala yang dibutuhkan untuk lebar dan tinggi
+            const scaleX = viewportWidth / appWidth;
+            const scaleY = viewportHeight / appHeight;
+
+            // Gunakan skala terkecil untuk memastikan seluruh konten pas di viewport
+            // tanpa menyebabkan scroll, sambil mempertahankan rasio aspek.
+            const scale = Math.min(scaleX, scaleY);
+
+            // Terapkan transformasi skala
+            wrapper.style.transform = `scale(${scale})`;
+            wrapper.style.transformOrigin = `top left`; // Skala dari sudut kiri atas
+
+            // Hitung tinggi yang diskalakan untuk pemosisian vertikal
+            const scaledHeight = appHeight * scale;
+
+            // Posisi X: Selalu lengket ke kiri (0px dari tepi viewport)
+            const offsetX = 0;
+            // Posisi Y: Pusatkan secara vertikal
+            const offsetY = (viewportHeight - scaledHeight) / 2;
+
+            // Terapkan posisi absolut
+            wrapper.style.left = `${offsetX}px`;
+            wrapper.style.top = `${offsetY}px`;
+
+            // Skalakan juga posisi popup agar tetap di pojok kanan bawah yang terlihat
+            const loadingPopup = document.getElementById('loading-popup');
+            // Loading popup sudah fixed position, jadi tidak perlu penyesuaian khusus
+        }
+
+        // --- Single Page Application (SPA) Logic ---
+        function showPage(pageId) {
+            const pages = ['dashboard-page', 'daftar-foto-page'];
+            pages.forEach(id => {
+                const page = document.getElementById(id);
+                if (page) {
+                    page.classList.add('hidden');
+                }
+            });
+
+            const activePage = document.getElementById(pageId);
+            if (activePage) {
+                activePage.classList.remove('hidden');
+            }
+
+            // Update active state for sidebar buttons
+            const buttons = document.querySelectorAll('.sidebar-button');
+            buttons.forEach(button => {
+                button.classList.remove('active');
+                if (button.id === `${pageId.replace('-page', '')}-btn`) {
+                    button.classList.add('active');
+                }
+            });
+        }
+
+        // Function to generate random data for demonstration
+        function generateRandomData() {
+            const lat = (Math.random() * 180 - 90).toFixed(6); // -90 to 90
+            const lon = (Math.random() * 360 - 180).toFixed(6); // -180 to 180
+            const battery = (Math.random() * 100).toFixed(1);
+            const voltage = (Math.random() * 3 + 3).toFixed(1); // 3V to 6V
+            const current = (Math.random() * 0.5 + 0.1).toFixed(5); // 0.1A to 0.6A
+            const sogKnots = (Math.random() * 20).toFixed(1);
+            const cogKnots = (Math.random() * 360).toFixed(1);
+            const heading = (Math.random() * 360).toFixed(0); // Heading for rotation
+
+            // For log messages
+            const currentTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+            const logKameraAtas = `TipeLintasan_Atas_Hijau_${currentTime.replace(':', '_')}.jpg`;
+            const logKameraBawah = Math.random() > 0.5 ? `TipeLintasan_Bawah_Hijau_${currentTime.replace(':', '_')}.jpg` : "Menuggu....";
+
+            // For radio buttons
+            const trajectoryMode = Math.random() < 0.5 ? 'A' : 'B';
+            const currentStateOptions = ['Belum Mulai', 'Start', 'Perjalanan', 'Finish'];
+            const currentState = currentStateOptions[Math.floor(Math.random() * currentStateOptions.length)];
+
+            return { lat, lon, battery, voltage, current, sogKnots, cogKnots, heading, logKameraAtas, logKameraBawah, trajectoryMode, currentState };
+        }
+
+        // Function to refresh dashboard data
+        function refreshDashboardData() {
+            const data = generateRandomData();
+
+            // Update GPS
+            document.getElementById('gps-latitude').textContent = data.lat;
+            document.getElementById('gps-longitude').textContent = data.lon;
+
+            // Update Battery, Voltage, Current
+            document.getElementById('battery-level').textContent = data.battery;
+            document.getElementById('voltage').textContent = data.voltage;
+            document.getElementById('current').textContent = data.current;
+
+            // Update SOG/COG
+            document.getElementById('sog-knots').textContent = data.sogKnots;
+            document.getElementById('sog-kmh').textContent = (data.sogKnots * 1.852).toFixed(1); // Convert knots to km/h
+            document.getElementById('cog-knots').textContent = data.cogKnots;
+            document.getElementById('cog-kmh').textContent = (data.cogKnots * 1.852).toFixed(1);
+
+            // Update Compass Heading text
+            document.getElementById('heading-text').textContent = `${data.heading}°`;
+
+            // Rotate Compass Image
+            const compassImageContainer = document.getElementById('compass-image-container');
+            if (compassImageContainer) {
+                compassImageContainer.style.transform = `rotate(${data.heading}deg)`;
+            }
+
+            // Update Footer Logs
+            document.getElementById('log-kamera-atas').textContent = data.logKameraAtas;
+            document.getElementById('log-kamera-bawah').textContent = data.logKameraBawah;
+
+            // Update Trajectory Mode radio buttons
+            document.getElementById(`trajectory-mode-${data.trajectoryMode.toLowerCase()}`).checked = true;
+            // Update "Lintasan A/B" header based on selected mode
+            document.getElementById('lintasan-ab-header').textContent = `Lintasan ${data.trajectoryMode}`;
+
+            // Update Current State radio buttons
+            // Deselect all current state radios first
+            document.querySelectorAll('input[name="current_state"]').forEach(radio => radio.checked = false);
+            // Then select the new random one
+            const stateId = `current-state-${data.currentState.toLowerCase().replace(' ', '-')}`;
+            const stateRadio = document.getElementById(stateId);
+            if (stateRadio) {
+                stateRadio.checked = true;
+            }
+        }
+
+        // --- Restart Confirmation Popup Logic ---
+        function showRestartPopup() {
+            const selectedMode = document.querySelector('input[name="trajectory_mode"]:checked').value;
+            const popupMessage = document.getElementById('restart-popup-message');
+            popupMessage.textContent = `Apakah anda yakin ingin memulai dari awal di mode lintasan ${selectedMode}?`;
+            
+            // Show the popup with proper animation
+            const popupOverlay = document.getElementById('restart-popup-overlay');
+            popupOverlay.classList.add('visible');
+        }
+
+        function hideRestartPopup() {
+            const popupOverlay = document.getElementById('restart-popup-overlay');
+            popupOverlay.classList.remove('visible');
+        }
+
+        function handleRestartConfirm() {
+            console.log("Restart dikonfirmasi!");
+            // Implement actual restart logic here
+            refreshDashboardData(); // For demonstration, refresh data on restart
+            hideRestartPopup();
+        }
+
+        function handleRestartCancel() {
+            console.log("Restart dibatalkan.");
+            hideRestartPopup();
+        }
+
+        // --- Video Streaming Logic ---
+        function setupVideoStreams() {
+            // Simulasi URL streaming - ganti dengan URL kamera yang sesungguhnya
+            // Contoh URL untuk streaming MJPEG: 
+            // const kameraAtasStreamUrl = 'http://alamat-ip-kamera:port/video';
+            
+            // Untuk demo, kita akan menggunakan video placeholder
+            const kameraAtasVideo = document.getElementById('kamera-atas-video');
+            const kameraBawahVideo = document.getElementById('kamera-bawah-video');
+            
+            // Status indicators
+            const kameraAtasStatus = document.getElementById('kamera-atas-status');
+            const kameraBawahStatus = document.getElementById('kamera-bawah-status');
+            
+            // Placeholder elements
+            const kameraAtasPlaceholder = document.getElementById('kamera-atas-placeholder');
+            const kameraBawahPlaceholder = document.getElementById('kamera-bawah-placeholder');
+            
+            // Simulasi koneksi ke stream (dalam aplikasi nyata, ganti dengan URL streaming sebenarnya)
+            simulateVideoConnection(kameraAtasVideo, kameraAtasStatus, kameraAtasPlaceholder, 2000);
+            simulateVideoConnection(kameraBawahVideo, kameraBawahStatus, kameraBawahPlaceholder, 3500);
+        }
+        
+        function simulateVideoConnection(videoElement, statusElement, placeholderElement, delay) {
+            // Status awal: Menyambungkan
+            statusElement.className = 'stream-status status-connecting';
+            statusElement.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i> Menyambungkan';
+            
+            // Simulasi koneksi setelah delay tertentu
+            setTimeout(() => {
+                // 80% kemungkinan berhasil terhubung, 20% gagal (untuk simulasi)
+                if (Math.random() > 0.2) {
+                    // Berhasil terhubung
+                    statusElement.className = 'stream-status status-live';
+                    statusElement.innerHTML = '<i class="fas fa-circle mr-1"></i> LIVE';
+                    placeholderElement.style.display = 'none';
+                    
+                    // Untuk demo, gunakan video placeholder
+                    // Dalam aplikasi nyata, ganti dengan: videoElement.src = 'URL_STREAMING_KAMERA';
+                    videoElement.src = 'https://assets.mixkit.co/videos/preview/mixkit-aerial-view-of-a-sailboat-in-the-sea-34560-large.mp4';
+                    videoElement.loop = true;
+                    videoElement.play().catch(e => console.log('Autoplay prevented:', e));
+                } else {
+                    // Gagal terhubung
+                    statusElement.className = 'stream-status status-offline';
+                    statusElement.innerHTML = '<i class="fas fa-exclamation-triangle mr-1"></i> Offline';
+                    placeholderElement.style.display = 'flex';
+                }
+            }, delay);
+        }
+
+        // Event listeners untuk sidebar navigation
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('dashboard-btn').addEventListener('click', () => showPage('dashboard-page'));
+            document.getElementById('daftar-foto-btn').addEventListener('click', () => showPage('daftar-foto-page'));
+            document.getElementById('refresh-data-btn').addEventListener('click', refreshDashboardData);
+            document.getElementById('mulai-btn').addEventListener('click', () => console.log("Tombol Mulai diklik!"));
+            
+            // Restart button and popup handlers
+            document.getElementById('restart-btn').addEventListener('click', showRestartPopup);
+            document.getElementById('restart-confirm-yes').addEventListener('click', handleRestartConfirm);
+            document.getElementById('restart-confirm-no').addEventListener('click', handleRestartCancel);
+
+            // Add event listeners for trajectory mode radio buttons
+            document.querySelectorAll('input[name="trajectory_mode"]').forEach(radio => {
+                radio.addEventListener('change', function() {
+                    document.getElementById('lintasan-ab-header').textContent = `Lintasan ${this.value}`;
+                });
+            });
+
+            // Setup video streams
+            setupVideoStreams();
+
+            // Show dashboard by default on load
+            showPage('dashboard-page');
+            refreshDashboardData(); // Call once on load to populate initial dynamic data
+        });
+
+        // Panggil fungsi scaleContent saat halaman dimuat dan saat ukuran jendela diubah
+        window.addEventListener('resize', scaleContent);
+        window.addEventListener('load', scaleContent);
+
+        // Panggil juga sekali secara langsung untuk memastikan skala diterapkan pada pemuatan awal
+        scaleContent();
+    </script>
+</body>
+</html>
