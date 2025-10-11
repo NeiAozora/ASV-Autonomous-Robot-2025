@@ -181,8 +181,8 @@ class ParallelRunner:
 def run():
     p = ParallelRunner()
 
-    p.add_process("camera_server", "bash server/camera/camera_v2_go/run_server.sh", True, None)
-    p.add_process("controller_server", "cd server/control && uvicorn server:app --host 0.0.0.0 --port 2000 --workers 4", True, None)
+    p.add_process("camera_server", "cd server/camera/camera_v2_go/ && bash run_server.sh", True, None)
+    p.add_process("controller_server", "cd server/control && uvicorn server:app --host 0.0.0.0 --port 2000 --workers 2", True, None)
     p.add_process("server_tranceiver", "go run server/tranceiver/main.go", True, None)
 
     p.run()
