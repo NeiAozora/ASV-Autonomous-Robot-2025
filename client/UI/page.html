@@ -209,48 +209,20 @@
 <body>
 
     <div id="desktop-app-wrapper">
-        <div class="w-[1701px] h-[1024px] relative bg-white overflow-hidden">
+        <div class="w-[2067px] h-[1024px] relative bg-white overflow-hidden">
             <!-- Main Content Area - This area will contain dynamic content for Dashboard/Daftar Foto -->
             <div id="dashboard-page" class="absolute inset-0">
-                <!-- Kamera Atas - Diubah dari placeholder ke video streaming -->
-                <div class="w-96 h-64 left-[1199px] top-[55.07px] absolute rounded-lg overflow-hidden video-container">
-                    <video id="kamera-atas-video" autoplay muted playsinline>
-                        Your browser does not support the video tag.
-                    </video>
-                    <div class="stream-status status-connecting" id="kamera-atas-status">
-                        <i class="fas fa-circle-notch fa-spin mr-1"></i> Menyambungkan
-                    </div>
-                    <div class="video-placeholder" id="kamera-atas-placeholder">
-                        <i class="fas fa-video text-3xl mb-2"></i>
-                        <p>Kamera Atas</p>
-                    </div>
+                <!-- LEFT SIDE: Trajectory Visualisizer -->
+                <div class="w-[590px] h-96 left-[261px] top-[75px] absolute bg-zinc-300 rounded-lg flex items-center justify-center text-gray-500 text-xl font-semibold">
+                    Trajectory Visualisizer
                 </div>
-                <div class="w-36 h-6 left-[1199px] top-[31px] absolute text-black text-xl font-normal font-['Inter']">Kamera Atas</div>
                 
-                <!-- Peta Arena Lintasan (Trajectory) -->
-                <div class="w-[501px] h-80 left-[1142px] top-[684.06px] absolute bg-zinc-300 rounded-lg"></div>
-                <div class="w-[539px] h-7 left-[1142px] top-[655px] absolute text-black text-xl font-normal font-['Inter']">Peta Arena Lintasan (Trajectory)</div>
-                
-                <!-- Kamera Bawah - Diubah dari placeholder ke video streaming -->
-                <div class="w-96 h-64 left-[1199px] top-[353.75px] absolute rounded-lg overflow-hidden video-container">
-                    <video id="kamera-bawah-video" autoplay muted playsinline>
-                        Your browser does not support the video tag.
-                    </video>
-                    <div class="stream-status status-connecting" id="kamera-bawah-status">
-                        <i class="fas fa-circle-notch fa-spin mr-1"></i> Menyambungkan
-                    </div>
-                    <div class="video-placeholder" id="kamera-bawah-placeholder">
-                        <i class="fas fa-video text-3xl mb-2"></i>
-                        <p>Kamera Bawah</p>
-                    </div>
-                </div>
-                <div class="w-44 h-6 left-[1199px] top-[330.30px] absolute text-black text-xl font-normal font-['Inter']">Kamera Bawah</div>
-                
-                <!-- Trajectory Visualisizer -->
-                <div class="w-[590px] h-96 left-[261px] top-[75px] absolute bg-zinc-300 rounded-lg flex items-center justify-center text-gray-500 text-xl font-semibold">Trajectory Visualisizer</div>
+                <!-- GPS Data -->
                 <div class="w-52 left-[285px] top-[530px] absolute text-black text-3xl font-normal font-['Inter']">GPS</div>
                 <div class="left-[237px] top-[578px] absolute text-black text-base font-normal font-['Inter']">Langitude : <span id="gps-latitude">XXXXXXX</span></div>
                 <div class="left-[237px] top-[608px] absolute text-black text-base font-normal font-['Inter']">Longitude : <span id="gps-longitude">XXXXXXX</span></div>
+
+                <!-- Battery and Power Information -->
                 <div class="w-44 left-[237px] top-[668px] absolute text-center text-black text-2xl font-normal font-['Inter']">Daya Batterai</div>
                 <div class="w-44 left-[232px] top-[698px] absolute text-center text-black text-2xl font-normal font-['Inter']"><span id="battery-level">76.7</span>%</div>
 
@@ -260,6 +232,7 @@
                 <div class="left-[291px] top-[815px] absolute text-center text-black text-2xl font-normal font-['Inter']">Arus</div>
                 <div class="left-[260px] top-[846px] absolute text-center text-black text-2xl font-normal font-['Inter']"><span id="current">0.34353</span>A</div>
 
+                <!-- SOG and COG Data -->
                 <div class="w-44 left-[677px] top-[538px] absolute text-center text-black text-2xl font-normal font-['Inter']">SOG</div>
                 <div class="w-44 left-[672px] top-[568px] absolute text-center text-black text-2xl font-normal font-['Inter']"><span id="sog-knots">00</span> Knots</div>
                 <div class="w-44 left-[672px] top-[595px] absolute text-center text-black text-2xl font-normal font-['Inter']"><span id="sog-kmh">00</span> Km/h</div>
@@ -268,6 +241,7 @@
                 <div class="w-44 left-[675px] top-[669px] absolute text-center text-black text-2xl font-normal font-['Inter']"><span id="cog-knots">00</span> Knots</div>
                 <div class="w-44 left-[674px] top-[698px] absolute text-center text-black text-2xl font-normal font-['Inter']"><span id="cog-kmh">00</span> Km/h</div>
 
+                <!-- Compass and Heading -->
                 <div class="left-[492px] top-[794px] absolute text-black text-base font-normal font-['Inter']">Heading : <span id="heading-text">123°</span> </div>
                 <div class="w-52 left-[492px] top-[530px] absolute text-black text-3xl font-normal font-['Inter']">Kompas</div>
                 
@@ -276,12 +250,81 @@
                     <img id="compass-image" class="w-[217px] h-[217px]" src="Kompas.png" alt="Compass representation" />
                 </div>
 
+                <!-- Header and Title -->
                 <div id="lintasan-ab-header" class="left-[261px] top-[31px] absolute text-black text-4xl font-normal font-['Inter']">Lintasan A/B</div>
                 <div class="left-[421px] top-[247px] absolute text-center text-black text-2xl font-normal font-['Inter']">Trajectory Visualisizer</div>
 
+                <!-- Start and Finish Times -->
                 <div class="left-[307px] top-[470px] absolute justify-start"><span class="text-black text-lg font-normal font-['Inter']">Waktu Mulai : </span><span class="text-red-600 text-lg font-normal font-['Inter']">Belum Mulai</span></div>
                 <div class="left-[550px] top-[470px] absolute justify-start"><span class="text-black text-lg font-normal font-['Inter']">Waktu Finish : </span><span class="text-red-600 text-lg font-normal font-['Inter']">Belum Sampai</span></div>
                 
+                <!-- RIGHT SIDE: Images and Live Feeds -->
+                <!-- Potret Gambar Atas (Static Image) -->
+                <div class="w-96 h-64 left-[1199px] top-[55px] absolute rounded-lg overflow-hidden bg-zinc-300 flex items-center justify-center">
+                    <div class="text-center text-gray-600">
+                        <i class="fas fa-image text-4xl mb-2"></i>
+                        <p>Potret Gambar Atas</p>
+                    </div>
+                </div>
+                <div class="w-56 h-6 left-[1199px] top-[31px] absolute text-black text-xl font-normal font-['Inter']">Potret Gambar Atas</div>
+                
+                <!-- Peta Arena Lintasan (Trajectory) -->
+                <div class="w-[501px] h-80 left-[1142px] top-[684px] absolute bg-zinc-300 rounded-lg flex items-center justify-center">
+                    <div class="text-center text-gray-600">
+                        <i class="fas fa-map-marked-alt text-4xl mb-2"></i>
+                        <p>Peta Arena Lintasan</p>
+                    </div>
+                </div>
+                <div class="w-[539px] h-7 left-[1142px] top-[655px] absolute text-black text-xl font-normal font-['Inter']">Peta Arena Lintasan (Trajectory)</div>
+                
+                <!-- Potret Gambar Bawah (Static Image) -->
+                <div class="w-96 h-64 left-[1199px] top-[353px] absolute rounded-lg overflow-hidden bg-zinc-300 flex items-center justify-center">
+                    <div class="text-center text-gray-600">
+                        <i class="fas fa-image text-4xl mb-2"></i>
+                        <p>Potret Gambar Bawah</p>
+                    </div>
+                </div>
+                <div class="w-60 h-6 left-[1199px] top-[330px] absolute text-black text-xl font-normal font-['Inter']">Potret Gambar Bawah</div>
+                
+                <!-- RQT Plot -->
+                <div class="w-80 h-80 left-[1681px] top-[676px] absolute bg-zinc-300 rounded-lg flex items-center justify-center">
+                    <div class="text-center text-gray-600">
+                        <i class="fas fa-chart-line text-4xl mb-2"></i>
+                        <p>RQT Plot</p>
+                    </div>
+                </div>
+                <div class="w-72 h-8 left-[1681px] top-[647px] absolute text-black text-xl font-normal font-['Inter']">RQT Plot</div>
+                
+                <!-- Live Foto Bawah -->
+                <div class="w-80 h-48 left-[1681px] top-[398px] absolute rounded-lg overflow-hidden video-container">
+                    <video id="live-foto-bawah-video" autoplay muted playsinline>
+                        Your browser does not support the video tag.
+                    </video>
+                    <div class="stream-status status-connecting" id="live-foto-bawah-status">
+                        <i class="fas fa-circle-notch fa-spin mr-1"></i> Menyambungkan
+                    </div>
+                    <div class="video-placeholder" id="live-foto-bawah-placeholder">
+                        <i class="fas fa-video text-3xl mb-2"></i>
+                        <p>Live Foto Bawah</p>
+                    </div>
+                </div>
+                <div class="w-72 h-5 left-[1681px] top-[380px] absolute text-black text-xl font-normal font-['Inter']">Live Foto Bawah</div>
+                
+                <!-- Live Kamera Bawah -->
+                <div class="w-80 h-48 left-[1681px] top-[132px] absolute rounded-lg overflow-hidden video-container">
+                    <video id="live-kamera-bawah-video" autoplay muted playsinline>
+                        Your browser does not support the video tag.
+                    </video>
+                    <div class="stream-status status-connecting" id="live-kamera-bawah-status">
+                        <i class="fas fa-circle-notch fa-spin mr-1"></i> Menyambungkan
+                    </div>
+                    <div class="video-placeholder" id="live-kamera-bawah-placeholder">
+                        <i class="fas fa-video text-3xl mb-2"></i>
+                        <p>Live Kamera Bawah</p>
+                    </div>
+                </div>
+                <div class="w-56 h-5 left-[1681px] top-[115px] absolute text-black text-xl font-normal font-['Inter']">Live Kamera Bawah</div>
+
                 <!-- Mode Lintasan (Trajectory Mode) - Changed to radio buttons with IDs -->
                 <div class="left-[926px] top-[99px] absolute text-black text-2xl font-normal font-['Inter']">Mode Lintasan</div>
                 <div class="absolute left-[970px] top-[158px] flex flex-col space-y-4">
@@ -294,6 +337,20 @@
                         <span class="ml-3 text-black text-2xl font-normal font-['Inter']">B</span>
                     </label>
                 </div>
+
+
+                <!-- MODE: Remote/Autonomous - Added above Keadaan Sekarang -->
+                <!-- <div class="left-[970px] top-[275px] absolute text-center text-black text-2xl font-normal font-['Inter']">Mode</div>
+                <div class="absolute left-[970px] top-[332px] flex flex-col space-y-4">
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="radio" name="operation_mode" value="Remote" id="operation-mode-remote" class="form-radio remote-radio">
+                        <span class="ml-3 text-black text-2xl font-normal font-['Inter']">Remote</span>
+                    </label>
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="radio" name="operation_mode" value="Autonomous" id="operation-mode-autonomous" class="form-radio autonomous-radio" checked>
+                        <span class="ml-3 text-black text-2xl font-normal font-['Inter']">Autonomous</span>
+                    </label>
+                </div> -->
 
                 <!-- Keadaan Sekarang (Current State) - Updated radio buttons with IDs -->
                 <div class="left-[904px] top-[444px] absolute text-center text-black text-2xl font-normal font-['Inter']">Keadaan Sekarang</div>
@@ -331,6 +388,7 @@
                     <i class="fas fa-play mr-2"></i> Mulai
                 </button>
                 
+                <!-- Footer Logs -->
                 <div class="left-[185px] top-[957px] absolute text-black text-lg font-normal font-['Inter']">Log Kamera Atas     : <span id="log-kamera-atas">TipeLintasan_Atas_Hijau_Time.jpg</span></div>
                 <div class="left-[185px] top-[986px] absolute text-black text-lg font-normal font-['Inter']">Log Kamera Bawah : <span id="log-kamera-bawah">Menuggu....</span></div>
             </div>
@@ -409,7 +467,7 @@
                 <!-- Vertical Brand Text -->
                 <div class="relative w-full h-1/3">
                     <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 transform origin-center text-xl font-bold text-gray-400 opacity-75 whitespace-nowrap">
-
+                        <!-- DO NOT ADD, THIS IS SVG ONLY -->
                     </div>
                 </div>
             </div>
@@ -443,7 +501,7 @@
          */
         function scaleContent() {
             const wrapper = document.getElementById('desktop-app-wrapper');
-            const appWidth = 1701; // Lebar desain asli (piksel)
+            const appWidth = 2067; // Updated width
             const appHeight = 1024; // Tinggi desain asli (piksel)
 
             const viewportWidth = window.innerWidth;
@@ -605,25 +663,21 @@
 
         // --- Video Streaming Logic ---
         function setupVideoStreams() {
-            // Simulasi URL streaming - ganti dengan URL kamera yang sesungguhnya
-            // Contoh URL untuk streaming MJPEG: 
-            // const kameraAtasStreamUrl = 'http://alamat-ip-kamera:port/video';
-            
-            // Untuk demo, kita akan menggunakan video placeholder
-            const kameraAtasVideo = document.getElementById('kamera-atas-video');
-            const kameraBawahVideo = document.getElementById('kamera-bawah-video');
+            // Simulate video connections for Live Foto Bawah and Live Kamera Bawah
+            const liveFotoBawahVideo = document.getElementById('live-foto-bawah-video');
+            const liveKameraBawahVideo = document.getElementById('live-kamera-bawah-video');
             
             // Status indicators
-            const kameraAtasStatus = document.getElementById('kamera-atas-status');
-            const kameraBawahStatus = document.getElementById('kamera-bawah-status');
+            const liveFotoBawahStatus = document.getElementById('live-foto-bawah-status');
+            const liveKameraBawahStatus = document.getElementById('live-kamera-bawah-status');
             
             // Placeholder elements
-            const kameraAtasPlaceholder = document.getElementById('kamera-atas-placeholder');
-            const kameraBawahPlaceholder = document.getElementById('kamera-bawah-placeholder');
+            const liveFotoBawahPlaceholder = document.getElementById('live-foto-bawah-placeholder');
+            const liveKameraBawahPlaceholder = document.getElementById('live-kamera-bawah-placeholder');
             
-            // Simulasi koneksi ke stream (dalam aplikasi nyata, ganti dengan URL streaming sebenarnya)
-            simulateVideoConnection(kameraAtasVideo, kameraAtasStatus, kameraAtasPlaceholder, 2000);
-            simulateVideoConnection(kameraBawahVideo, kameraBawahStatus, kameraBawahPlaceholder, 3500);
+            // Simulate video connections with different delays
+            simulateVideoConnection(liveFotoBawahVideo, liveFotoBawahStatus, liveFotoBawahPlaceholder, 2000);
+            simulateVideoConnection(liveKameraBawahVideo, liveKameraBawahStatus, liveKameraBawahPlaceholder, 3500);
         }
         
         function simulateVideoConnection(videoElement, statusElement, placeholderElement, delay) {

@@ -3,20 +3,120 @@ import psutil
 import platform
 import socket
 import datetime
+import os
+import subprocess
+import re
 
 app = Flask(__name__)
+
+def get_jetson_power_info():
+    """Get power information specific to Jetson Nano"""
+    power_info = {}
+    
+    try:
+        # Get CPU power usage
+        result = subprocess.run(['cat', '/sys/bus/i2c/drivers/ina3221/0-0040/iio:device0/in_power0_input'], 
+                              capture_output=True, text=True)
+        if result.returncode == 0:
+            power_info['cpu_power_mw'] = float(result.stdout.strip()) / 1000  # Convert to mW
+        
+        # Get GPU power usage
+        result = subprocess.run(['cat', '/sys/bus/i2c/drivers/ina3221/0-0040/iio:device0/in_power1_input'], 
+                              capture_output=True, text=True)
+        if result.returncode == 0:
+            power_info['gpu_power_mw'] = float(result.stdout.strip()) / 1000  # Convert to mW
+        
+        # Get SOC power usage
+        result = subprocess.run(['cat', '/sys/bus/i2c/drivers/ina3221/0-0040/iio:device0/in_power2_input'], 
+                              capture_output=True, text=True)
+        if result.returncode == 0:
+            power_info['soc_power_mw'] = float(result.stdout.strip()) / 1000  # Convert to mW
+        
+        # Get total power consumption
+        result = subprocess.run(['cat', '/sys/bus/i2c/drivers/ina3221/0-0041/iio:device1/in_power0_input'], 
+                              capture_output=True, text=True)
+        if result.returncode == 0:
+            power_info['total_power_mw'] = float(result.stdout.strip()) / 1000  # Convert to mW
+        
+        # Get current values
+        result = subprocess.run(['cat', '/sys/bus/i2c/drivers/ina3221/0-0040/iio:device0/in_current0_input'], 
+                              capture_output=True, text=True)
+        if result.returncode == 0:
+            power_info['cpu_current_ma'] = float(result.stdout.strip()) / 1000  # Convert to mA
+            
+        result = subprocess.run(['cat', '/sys/bus/i2c/drivers/ina3221/0-0040/iio:device0/in_current1_input'], 
+                              capture_output=True, text=True)
+        if result.returncode == 0:
+            power_info['gpu_current_ma'] = float(result.stdout.strip()) / 1000  # Convert to mA
+            
+        result = subprocess.run(['cat', '/sys/bus/i2c/drivers/ina3221/0-0040/iio:device0/in_current2_input'], 
+                              capture_output=True, text=True)
+        if result.returncode == 0:
+            power_info['soc_current_ma'] = float(result.stdout.strip()) / 1000  # Convert to mA
+        
+        # Get voltage values
+        result = subprocess.run(['cat', '/sys/bus/i2c/drivers/ina3221/0-0040/iio:device0/in_voltage0_input'], 
+                              capture_output=True, text=True)
+        if result.returncode == 0:
+            power_info['cpu_voltage_mv'] = float(result.stdout.strip())  # Already in mV
+            
+        result = subprocess.run(['cat', '/sys/bus/i2c/drivers/ina3221/0-0040/iio:device0/in_voltage1_input'], 
+                              capture_output=True, text=True)
+        if result.returncode == 0:
+            power_info['gpu_voltage_mv'] = float(result.stdout.strip())
+            
+        result = subprocess.run(['cat', '/sys/bus/i2c/drivers/ina3221/0-0040/iio:device0/in_voltage2_input'], 
+                              capture_output=True, text=True)
+        if result.returncode == 0:
+            power_info['soc_voltage_mv'] = float(result.stdout.strip())
+        
+        # Get temperature
+        result = subprocess.run(['cat', '/sys/class/thermal/thermal_zone0/temp'], 
+                              capture_output=True, text=True)
+        if result.returncode == 0:
+            power_info['temperature_c'] = float(result.stdout.strip()) / 1000  # Convert to Celsius
+        
+        # Get GPU frequency
+        result = subprocess.run(['cat', '/sys/devices/gpu.0/devfreq/17000000.gv11b/cur_freq'], 
+                              capture_output=True, text=True)
+        if result.returncode == 0:
+            power_info['gpu_frequency_hz'] = int(result.stdout.strip())
+            
+        # Get CPU frequency
+        result = subprocess.run(['cat', '/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq'], 
+                              capture_output=True, text=True)
+        if result.returncode == 0:
+            power_info['cpu_frequency_hz'] = int(result.stdout.strip())
+            
+    except Exception as e:
+        power_info['error'] = str(e)
+    
+    return power_info
+
+def get_jetson_model():
+    """Get Jetson model information"""
+    try:
+        result = subprocess.run(['cat', '/proc/device-tree/model'], 
+                              capture_output=True, text=True)
+        if result.returncode == 0:
+            return result.stdout.strip().replace('\x00', '')
+        return "Jetson Nano"
+    except:
+        return "Jetson Nano"
 
 @app.route('/')
 def index():
     """Root endpoint with API information"""
     return jsonify({
-        "message": "System Information API",
+        "message": "Jetson Nano System Information API",
+        "model": get_jetson_model(),
         "endpoints": {
             "/": "This information",
             "/cpu": "CPU information and usage",
             "/memory": "Memory and swap usage",
             "/network": "Network information and statistics",
-            "/all": "All system information (CPU, Memory, Network)"
+            "/power": "Power consumption and sensors (Jetson specific)",
+            "/all": "All system information"
         }
     })
 
@@ -36,11 +136,6 @@ def cpu_info():
                     "min": f"{cpu_freq.min:.2f} MHz" if cpu_freq else "N/A",
                     "max": f"{cpu_freq.max:.2f} MHz" if cpu_freq else "N/A"
                 } if cpu_freq else "N/A",
-                "load_average": {
-                    "1min": os.getloadavg()[0] if hasattr(os, 'getloadavg') else "N/A",
-                    "5min": os.getloadavg()[1] if hasattr(os, 'getloadavg') else "N/A",
-                    "15min": os.getloadavg()[2] if hasattr(os, 'getloadavg') else "N/A"
-                }
             }
         })
     except Exception as e:
@@ -55,13 +150,13 @@ def memory_info():
         
         return jsonify({
             "memory": {
-                "total": virtual_memory.total,
-                "available": virtual_memory.available,
-                "used": virtual_memory.used,
+                "total_bytes": virtual_memory.total,
+                "available_bytes": virtual_memory.available,
+                "used_bytes": virtual_memory.used,
                 "used_percent": virtual_memory.percent,
-                "swap_total": swap_memory.total,
-                "swap_used": swap_memory.used,
-                "swap_free": swap_memory.free,
+                "swap_total_bytes": swap_memory.total,
+                "swap_used_bytes": swap_memory.used,
+                "swap_free_bytes": swap_memory.free,
                 "swap_used_percent": swap_memory.percent
             },
             "memory_human": {
@@ -127,26 +222,64 @@ def network_info():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/power')
+def power_info():
+    """Get power consumption information specific to Jetson Nano"""
+    try:
+        power_data = get_jetson_power_info()
+        
+        return jsonify({
+            "power_consumption": {
+                "cpu_power_mw": power_data.get('cpu_power_mw', 'N/A'),
+                "gpu_power_mw": power_data.get('gpu_power_mw', 'N/A'),
+                "soc_power_mw": power_data.get('soc_power_mw', 'N/A'),
+                "total_power_mw": power_data.get('total_power_mw', 'N/A'),
+                "cpu_current_ma": power_data.get('cpu_current_ma', 'N/A'),
+                "gpu_current_ma": power_data.get('gpu_current_ma', 'N/A'),
+                "soc_current_ma": power_data.get('soc_current_ma', 'N/A'),
+                "cpu_voltage_mv": power_data.get('cpu_voltage_mv', 'N/A'),
+                "gpu_voltage_mv": power_data.get('gpu_voltage_mv', 'N/A'),
+                "soc_voltage_mv": power_data.get('soc_voltage_mv', 'N/A')
+            },
+            "sensors": {
+                "temperature_c": power_data.get('temperature_c', 'N/A'),
+                "gpu_frequency_hz": power_data.get('gpu_frequency_hz', 'N/A'),
+                "cpu_frequency_hz": power_data.get('cpu_frequency_hz', 'N/A'),
+                "gpu_frequency_mhz": f"{power_data.get('gpu_frequency_hz', 0) / 1000000:.2f} MHz" if power_data.get('gpu_frequency_hz') else 'N/A',
+                "cpu_frequency_mhz": f"{power_data.get('cpu_frequency_hz', 0) / 1000:.2f} MHz" if power_data.get('cpu_frequency_hz') else 'N/A'
+            }
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/all')
 def all_info():
-    """Get all system information (CPU, Memory, Network) in one endpoint"""
+    """Get all system information in one endpoint"""
     try:
         return jsonify({
+            "system": {
+                "model": get_jetson_model(),
+                "hostname": socket.gethostname(),
+                "platform": platform.platform()
+            },
             "cpu": cpu_info().get_json()["cpu"],
             "memory": memory_info().get_json()["memory"],
-            "network": network_info().get_json()
+            "network": network_info().get_json(),
+            "power": power_info().get_json()
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     # Run the Flask app
-    print("Starting System Information API Server...")
+    print("Starting Jetson Nano System Information API Server...")
+    print(f"Device Model: {get_jetson_model()}")
     print("Available endpoints:")
     print("  http://localhost:5000/")
     print("  http://localhost:5000/cpu")
     print("  http://localhost:5000/memory")
     print("  http://localhost:5000/network")
+    print("  http://localhost:5000/power")
     print("  http://localhost:5000/all")
     
     app.run(host='0.0.0.0', port=5000, debug=True)
