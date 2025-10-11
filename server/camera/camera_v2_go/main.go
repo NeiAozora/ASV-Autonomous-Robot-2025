@@ -3,25 +3,29 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"image"
 	"image/jpeg"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/blackjack/webcam"
-	"github.com/korandiz/v4l"
 	"golang.org/x/sys/unix"
 )
 
 type CameraConfig struct {
-	Device      string
+	DevicePath  string
+	DeviceID    string
+	VendorID    string
+	ProductID   string
+	DeviceName  string
 	Width       uint32
 	Height      uint32
 	FPS         uint32
@@ -36,6 +40,7 @@ type CameraStream struct {
 	mutex       sync.RWMutex
 	lastFrame   []byte
 	errorCount  int
+	connected   bool
 }
 
 type StreamingServer struct {
@@ -51,64 +56,189 @@ const (
 	V4L2_PIX_FMT_YUYV  = 0x56595559
 )
 
-var (
-	DefaultCameraConfigs = [2]CameraConfig{
+// Global camera configurations - will be detected automatically
+var CameraConfigs [2]CameraConfig
+
+func init() {
+	// Initialize with default values, will be updated during detection
+	CameraConfigs = [2]CameraConfig{
 		{
-			Device:      "/dev/video0",
 			Width:       1280,
 			Height:      720,
 			FPS:         30,
 			PixelFormat: V4L2_PIX_FMT_MJPEG,
 		},
 		{
-			Device:      "/dev/video1",
 			Width:       1280,
 			Height:      720,
 			FPS:         30,
 			PixelFormat: V4L2_PIX_FMT_MJPEG,
 		},
 	}
-)
+}
+
+func detectCameras() error {
+	log.Println("Detecting available cameras...")
+	
+	// Method 1: Check /dev/video* devices
+	videoDevices, err := os.ReadDir("/dev")
+	if err != nil {
+		return err
+	}
+
+	var videoPaths []string
+	for _, entry := range videoDevices {
+		if strings.HasPrefix(entry.Name(), "video") {
+			videoPaths = append(videoPaths, "/dev/"+entry.Name())
+		}
+	}
+
+	if len(videoPaths) == 0 {
+		return fmt.Errorf("no video devices found in /dev")
+	}
+
+	log.Printf("Found video devices: %v", videoPaths)
+
+	// Method 2: Use v4l2-ctl to get detailed info
+	camerasFound := 0
+	for _, device := range videoPaths {
+		if camerasFound >= 2 {
+			break
+		}
+
+		// Try to get camera info using v4l2-ctl
+		cmd := exec.Command("v4l2-ctl", "--device", device, "--info")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Printf("Cannot query device %s: %v", device, err)
+			continue
+		}
+
+		info := string(output)
+		lines := strings.Split(info, "\n")
+		
+		var cameraName, busInfo string
+		for _, line := range lines {
+			if strings.Contains(line, "Card type") {
+				cameraName = strings.TrimSpace(strings.Split(line, ":")[1])
+			}
+			if strings.Contains(line, "Bus info") {
+				busInfo = strings.TrimSpace(strings.Split(line, ":")[1])
+			}
+		}
+
+		// Get USB info if available
+		var vendorID, productID string
+		if strings.Contains(busInfo, "usb") {
+			// Extract from bus info like "usb-70090000.xusb-2.4.3"
+			parts := strings.Split(busInfo, "-")
+			if len(parts) >= 4 {
+				// Try to get USB vendor:product from sysfs
+				usbInfo := getUSBInfo(device)
+				if usbInfo != "" {
+					ids := strings.Split(usbInfo, ":")
+					if len(ids) == 2 {
+						vendorID = ids[0]
+						productID = ids[1]
+					}
+				}
+			}
+		}
+
+		log.Printf("Detected camera: %s (%s) at %s [USB: %s:%s]", 
+			cameraName, busInfo, device, vendorID, productID)
+
+		// Assign to our camera configs
+		CameraConfigs[camerasFound] = CameraConfig{
+			DevicePath:  device,
+			DeviceID:    fmt.Sprintf("camera%d", camerasFound),
+			VendorID:    vendorID,
+			ProductID:   productID,
+			DeviceName:  cameraName,
+			Width:       1280,
+			Height:      720,
+			FPS:         30,
+			PixelFormat: V4L2_PIX_FMT_MJPEG,
+		}
+
+		camerasFound++
+	}
+
+	if camerasFound == 0 {
+		return fmt.Errorf("no usable cameras detected")
+	}
+
+	log.Printf("Successfully detected %d cameras", camerasFound)
+	return nil
+}
+
+func getUSBInfo(devicePath string) string {
+	// Extract USB vendor and product ID from sysfs
+	// This is a simplified version - you might need to adjust based on your system
+	basePath := "/sys/class/video4linux/"
+	deviceName := strings.TrimPrefix(devicePath, "/dev/")
+	
+	usbPath := basePath + deviceName + "/device/../idVendor"
+	vendorBytes, err := os.ReadFile(usbPath)
+	if err != nil {
+		return ""
+	}
+	vendor := strings.TrimSpace(string(vendorBytes))
+
+	usbPath = basePath + deviceName + "/device/../idProduct"
+	productBytes, err := os.ReadFile(usbPath)
+	if err != nil {
+		return ""
+	}
+	product := strings.TrimSpace(string(productBytes))
+
+	return vendor + ":" + product
+}
 
 func NewCameraStream(config CameraConfig) *CameraStream {
 	return &CameraStream{
 		config:      config,
-		frameBuffer: make(chan []byte, 10), // Buffer 10 frames
+		frameBuffer: make(chan []byte, 10),
 		running:     false,
 		errorCount:  0,
+		connected:   false,
 	}
 }
 
 func (cs *CameraStream) Initialize() error {
-	cam, err := webcam.Open(cs.config.Device)
+	log.Printf("Initializing camera: %s (%s)", cs.config.DevicePath, cs.config.DeviceName)
+	
+	cam, err := webcam.Open(cs.config.DevicePath)
 	if err != nil {
+		log.Printf("Failed to open camera %s: %v", cs.config.DevicePath, err)
 		return err
 	}
 	cs.cam = cam
 
-	// Set format dengan hardware acceleration
-	formatDesc := cs.cam.GetSupportedFormats()
-	log.Printf("Supported formats for %s:", cs.config.Device)
-	for format, desc := range formatDesc {
-		log.Printf("  %s (%s)", format, desc)
+	// Get supported formats
+	formats := cs.cam.GetSupportedFormats()
+	log.Printf("Supported formats for %s:", cs.config.DevicePath)
+	for format, desc := range formats {
+		log.Printf("  %s: %s", format, desc)
 	}
 
-	// Coba set format MJPEG untuk hardware encoding
+	// Try MJPEG first, then YUYV as fallback
 	_, _, _, err = cs.cam.SetImageFormat(cs.config.Width, cs.config.Height, webcam.PixelFormat(cs.config.PixelFormat))
 	if err != nil {
-		log.Printf("Failed to set MJPEG format, trying YUYV: %v", err)
-		// Fallback ke YUYV
+		log.Printf("MJPEG not supported, trying YUYV: %v", err)
 		_, _, _, err = cs.cam.SetImageFormat(cs.config.Width, cs.config.Height, webcam.PixelFormat(V4L2_PIX_FMT_YUYV))
 		if err != nil {
 			cam.Close()
-			return err
+			return fmt.Errorf("failed to set any supported format: %v", err)
 		}
+		// Update config to reflect actual format
+		cs.config.PixelFormat = V4L2_PIX_FMT_YUYV
 	}
 
 	// Set FPS
 	err = cs.cam.SetFramerate(cs.config.FPS)
 	if err != nil {
-		log.Printf("Warning: Could not set FPS: %v", err)
+		log.Printf("Warning: Could not set FPS to %d: %v", cs.config.FPS, err)
 	}
 
 	// Start streaming
@@ -119,7 +249,9 @@ func (cs *CameraStream) Initialize() error {
 	}
 
 	cs.running = true
-	log.Printf("Camera %s initialized: %dx%d @ %d fps", cs.config.Device, cs.config.Width, cs.config.Height, cs.config.FPS)
+	cs.connected = true
+	log.Printf("Camera %s initialized successfully: %dx%d @ %d fps, format: 0x%x", 
+		cs.config.DevicePath, cs.config.Width, cs.config.Height, cs.config.FPS, cs.config.PixelFormat)
 	return nil
 }
 
@@ -127,18 +259,22 @@ func (cs *CameraStream) StartCapture() {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("Camera %s capture panicked: %v", cs.config.Device, r)
+				log.Printf("Camera %s capture panicked: %v", cs.config.DevicePath, r)
 				cs.Reconnect()
 			}
 		}()
 
+		frameInterval := time.Second / time.Duration(cs.config.FPS)
+		
 		for cs.running {
-			err := cs.cam.WaitForFrame(5) // Timeout 5 detik
+			startTime := time.Now()
+			
+			err := cs.cam.WaitForFrame(5)
 			switch err {
 			case nil:
 				frame, err := cs.cam.ReadFrame()
 				if err != nil {
-					log.Printf("Error reading frame from %s: %v", cs.config.Device, err)
+					log.Printf("Error reading frame from %s: %v", cs.config.DevicePath, err)
 					cs.errorCount++
 					if cs.errorCount > 10 {
 						cs.Reconnect()
@@ -150,60 +286,60 @@ func (cs *CameraStream) StartCapture() {
 					continue
 				}
 
-				// Process frame based on format
 				processedFrame, err := cs.ProcessFrame(frame)
 				if err != nil {
-					log.Printf("Error processing frame from %s: %v", cs.config.Device, err)
+					log.Printf("Error processing frame from %s: %v", cs.config.DevicePath, err)
 					continue
 				}
 
 				cs.mutex.Lock()
 				cs.lastFrame = processedFrame
-				cs.errorCount = 0 // Reset error count on successful frame
+				cs.errorCount = 0
+				cs.connected = true
 				cs.mutex.Unlock()
 
 				// Non-blocking send to buffer
 				select {
 				case cs.frameBuffer <- processedFrame:
 				default:
-					// Drop frame if buffer full (maintain performance)
+					// Drop frame if buffer full
 				}
 
 			case unix.EAGAIN:
 				// Timeout, continue
 				continue
 			default:
-				log.Printf("Error waiting for frame from %s: %v", cs.config.Device, err)
+				log.Printf("Error waiting for frame from %s: %v", cs.config.DevicePath, err)
 				cs.errorCount++
+				cs.connected = false
 				if cs.errorCount > 5 {
 					cs.Reconnect()
 				}
-				time.Sleep(100 * time.Millisecond)
+			}
+
+			// Maintain FPS
+			elapsed := time.Since(startTime)
+			sleepTime := frameInterval - elapsed
+			if sleepTime > 0 {
+				time.Sleep(sleepTime)
 			}
 		}
 	}()
 }
 
 func (cs *CameraStream) ProcessFrame(frame []byte) ([]byte, error) {
-	// Jika frame sudah MJPEG, langsung gunakan
 	if cs.config.PixelFormat == V4L2_PIX_FMT_MJPEG {
 		return frame, nil
 	}
-
-	// Konversi YUYV ke JPEG menggunakan hardware acceleration jika memungkinkan
-	// Fallback ke software conversion
 	return cs.YUYVToJPEG(frame)
 }
 
 func (cs *CameraStream) YUYVToJPEG(data []byte) ([]byte, error) {
-	// Simple YUYV to JPEG conversion
-	// Dalam production, sebaiknya gunakan hardware acceleration melalui VAAPI
 	width := int(cs.config.Width)
 	height := int(cs.config.Height)
 
 	img := image.NewYCbCr(image.Rect(0, 0, width, height), image.YCbCrSubsampleRatio422)
 
-	// Convert YUYV to YCbCr
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x += 2 {
 			idx := (y*width + x) * 2
@@ -216,7 +352,6 @@ func (cs *CameraStream) YUYVToJPEG(data []byte) ([]byte, error) {
 			y2 := data[idx+2]
 			v := data[idx+3]
 
-			// Set pixels
 			img.Y[y*img.YStride+x] = y1
 			img.Y[y*img.YStride+x+1] = y2
 			img.Cb[y*img.CStride+x/2] = u
@@ -239,10 +374,17 @@ func (cs *CameraStream) GetFrame() []byte {
 	return cs.lastFrame
 }
 
+func (cs *CameraStream) IsConnected() bool {
+	cs.mutex.RLock()
+	defer cs.mutex.RUnlock()
+	return cs.connected
+}
+
 func (cs *CameraStream) Reconnect() {
-	log.Printf("Reconnecting camera %s...", cs.config.Device)
+	log.Printf("Reconnecting camera %s...", cs.config.DevicePath)
 	cs.mutex.Lock()
 	cs.running = false
+	cs.connected = false
 	cs.mutex.Unlock()
 
 	if cs.cam != nil {
@@ -250,27 +392,27 @@ func (cs *CameraStream) Reconnect() {
 		cs.cam.Close()
 	}
 
-	// Tunggu sebentar sebelum reconnect
 	time.Sleep(2 * time.Second)
 
 	for i := 0; i < 5; i++ {
 		err := cs.Initialize()
 		if err == nil {
 			cs.StartCapture()
-			log.Printf("Camera %s reconnected successfully", cs.config.Device)
+			log.Printf("Camera %s reconnected successfully", cs.config.DevicePath)
 			return
 		}
-		log.Printf("Reconnection attempt %d failed for %s: %v", i+1, cs.config.Device, err)
+		log.Printf("Reconnection attempt %d failed for %s: %v", i+1, cs.config.DevicePath, err)
 		time.Sleep(2 * time.Second)
 	}
 
-	log.Printf("Failed to reconnect camera %s after 5 attempts", cs.config.Device)
+	log.Printf("Failed to reconnect camera %s after 5 attempts", cs.config.DevicePath)
 }
 
 func (cs *CameraStream) Close() {
 	cs.mutex.Lock()
 	defer cs.mutex.Unlock()
 	cs.running = false
+	cs.connected = false
 	if cs.cam != nil {
 		cs.cam.StopStreaming()
 		cs.cam.Close()
@@ -279,39 +421,50 @@ func (cs *CameraStream) Close() {
 }
 
 func NewStreamingServer() *StreamingServer {
+	// Detect cameras first
+	err := detectCameras()
+	if err != nil {
+		log.Fatalf("Camera detection failed: %v", err)
+	}
+
 	server := &StreamingServer{}
 
-	// Initialize cameras
-	for i := 0; i < 2; i++ {
-		stream := NewCameraStream(DefaultCameraConfigs[i])
+	// Initialize detected cameras
+	for i := 0; i < len(CameraConfigs) && i < 2; i++ {
+		if CameraConfigs[i].DevicePath == "" {
+			continue
+		}
+
+		stream := NewCameraStream(CameraConfigs[i])
 		err := stream.Initialize()
 		if err != nil {
-			log.Printf("Failed to initialize camera %s: %v", DefaultCameraConfigs[i].Device, err)
+			log.Printf("Failed to initialize camera %s: %v", CameraConfigs[i].DevicePath, err)
 			continue
 		}
 		server.cameras[i] = stream
 		stream.StartCapture()
+		time.Sleep(500 * time.Millisecond) // Stagger initialization
 	}
 
 	return server
 }
 
-func (ss *StreamingServer) GenerateMJPEG(cameraID int) func(http.ResponseWriter, *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
+func (ss *StreamingServer) GenerateMJPEG(cameraID int) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		if cameraID < 0 || cameraID >= len(ss.cameras) || ss.cameras[cameraID] == nil {
-			http.Error(w, "Camera not found", http.StatusNotFound)
+			http.Error(c.Writer, "Camera not found", http.StatusNotFound)
 			return
 		}
 
-		w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		w.Header().Set("Pragma", "no-cache")
-		w.Header().Set("Expires", "0")
-		w.Header().Set("X-Accel-Buffering", "no") // Important for Nginx proxy
+		c.Writer.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+		c.Writer.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		c.Writer.Header().Set("Pragma", "no-cache")
+		c.Writer.Header().Set("Expires", "0")
+		c.Writer.Header().Set("X-Accel-Buffering", "no")
 
-		flusher, ok := w.(http.Flusher)
+		flusher, ok := c.Writer.(http.Flusher)
 		if !ok {
-			http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+			http.Error(c.Writer, "Streaming not supported", http.StatusInternalServerError)
 			return
 		}
 
@@ -322,26 +475,26 @@ func (ss *StreamingServer) GenerateMJPEG(cameraID int) func(http.ResponseWriter,
 
 		for {
 			select {
-			case <-r.Context().Done():
+			case <-c.Request.Context().Done():
 				return
 			case <-ticker.C:
 				frame := camera.GetFrame()
 				if frame == nil {
-					continue
+					// Send placeholder if no frame
+					frame = generatePlaceholder(cameraID, camera.IsConnected())
 				}
 
-				_, err := w.Write([]byte("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " +
-					string(len(frame)) + "\r\n\r\n"))
+				_, err := c.Writer.Write([]byte("--frame\r\nContent-Type: image/jpeg\r\n\r\n"))
 				if err != nil {
 					return
 				}
 
-				_, err = w.Write(frame)
+				_, err = c.Writer.Write(frame)
 				if err != nil {
 					return
 				}
 
-				_, err = w.Write([]byte("\r\n\r\n"))
+				_, err = c.Writer.Write([]byte("\r\n\r\n"))
 				if err != nil {
 					return
 				}
@@ -349,6 +502,40 @@ func (ss *StreamingServer) GenerateMJPEG(cameraID int) func(http.ResponseWriter,
 			}
 		}
 	}
+}
+
+func generatePlaceholder(cameraID int, connected bool) []byte {
+	img := image.NewRGBA(image.Rect(0, 0, 640, 480))
+	
+	// Create a simple placeholder image
+	// In practice, you might want to use a proper image
+	var buf bytes.Buffer
+	var text string
+	if connected {
+		text = fmt.Sprintf("Camera %d - No Frame", cameraID)
+	} else {
+		text = fmt.Sprintf("Camera %d - Disconnected", cameraID)
+	}
+	
+	// Simple colored placeholder
+	for y := 0; y < 480; y++ {
+		for x := 0; x < 640; x++ {
+			offset := (y*640 + x) * 4
+			if connected {
+				img.Pix[offset] = 50   // R
+				img.Pix[offset+1] = 50 // G  
+				img.Pix[offset+2] = 80 // B
+			} else {
+				img.Pix[offset] = 80   // R
+				img.Pix[offset+1] = 50 // G
+				img.Pix[offset+2] = 50 // B
+			}
+			img.Pix[offset+3] = 255 // A
+		}
+	}
+	
+	jpeg.Encode(&buf, img, &jpeg.Options{Quality: 50})
+	return buf.Bytes()
 }
 
 func (ss *StreamingServer) SetupRoutes() *gin.Engine {
@@ -359,20 +546,30 @@ func (ss *StreamingServer) SetupRoutes() *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Recovery())
 
-	// Static endpoint untuk testing
+	// Root endpoint with camera info
 	router.GET("/", func(c *gin.Context) {
+		cameraInfo := make([]gin.H, 0)
+		for i, cam := range ss.cameras {
+			if cam != nil {
+				cameraInfo = append(cameraInfo, gin.H{
+					"camera_id":   i,
+					"device_path": cam.config.DevicePath,
+					"device_name": cam.config.DeviceName,
+					"vendor_id":   cam.config.VendorID,
+					"product_id":  cam.config.ProductID,
+					"connected":   cam.IsConnected(),
+					"resolution": gin.H{
+						"width":  cam.config.Width,
+						"height": cam.config.Height,
+					},
+					"fps": cam.config.FPS,
+				})
+			}
+		}
+
 		c.JSON(200, gin.H{
 			"message": "Dual Camera Streaming Server",
-			"cameras": []string{
-				"/camera/0",
-				"/camera/1",
-			},
-			"features": []string{
-				"Hardware Acceleration",
-				"720p Resolution",
-				"Auto Reconnection",
-				"30 FPS Target",
-			},
+			"cameras": cameraInfo,
 		})
 	})
 
@@ -388,6 +585,9 @@ func (ss *StreamingServer) SetupRoutes() *gin.Engine {
 	router.POST("/reconnect/0", ss.ReconnectCamera(0))
 	router.POST("/reconnect/1", ss.ReconnectCamera(1))
 
+	// Camera discovery endpoint
+	router.GET("/discover", ss.DiscoverCameras)
+
 	return router
 }
 
@@ -400,10 +600,13 @@ func (ss *StreamingServer) CameraStatus(cameraID int) gin.HandlerFunc {
 
 		camera := ss.cameras[cameraID]
 		c.JSON(200, gin.H{
-			"camera_id": cameraID,
-			"device":    camera.config.Device,
-			"running":   camera.running,
-			"errors":    camera.errorCount,
+			"camera_id":   cameraID,
+			"device_path": camera.config.DevicePath,
+			"device_name": camera.config.DeviceName,
+			"vendor_id":   camera.config.VendorID,
+			"product_id":  camera.config.ProductID,
+			"connected":   camera.IsConnected(),
+			"errors":      camera.errorCount,
 			"resolution": gin.H{
 				"width":  camera.config.Width,
 				"height": camera.config.Height,
@@ -424,10 +627,42 @@ func (ss *StreamingServer) ReconnectCamera(cameraID int) gin.HandlerFunc {
 		go camera.Reconnect()
 
 		c.JSON(200, gin.H{
-			"message":   "Reconnection initiated",
-			"camera_id": cameraID,
+			"message":    "Reconnection initiated",
+			"camera_id":  cameraID,
+			"device_path": camera.config.DevicePath,
 		})
 	}
+}
+
+func (ss *StreamingServer) DiscoverCameras(c *gin.Context) {
+	err := detectCameras()
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	cameras := make([]gin.H, 0)
+	for i, config := range CameraConfigs {
+		if config.DevicePath != "" {
+			cameras = append(cameras, gin.H{
+				"camera_id":   i,
+				"device_path": config.DevicePath,
+				"device_name": config.DeviceName,
+				"vendor_id":   config.VendorID,
+				"product_id":  config.ProductID,
+				"resolution": gin.H{
+					"width":  config.Width,
+					"height": config.Height,
+				},
+				"fps": config.FPS,
+			})
+		}
+	}
+
+	c.JSON(200, gin.H{
+		"message": "Camera discovery completed",
+		"cameras": cameras,
+	})
 }
 
 func (ss *StreamingServer) Start(addr string) error {
@@ -447,7 +682,7 @@ func (ss *StreamingServer) Shutdown() {
 
 	for i, camera := range ss.cameras {
 		if camera != nil {
-			log.Printf("Closing camera %d...", i)
+			log.Printf("Closing camera %d (%s)...", i, camera.config.DevicePath)
 			camera.Close()
 		}
 	}
@@ -472,6 +707,15 @@ func main() {
 			log.Fatalf("Server error: %v", err)
 		}
 	}()
+
+	log.Println("Server started on :8080")
+	log.Println("Endpoints:")
+	log.Println("  GET /              - Server info")
+	log.Println("  GET /camera/0      - Stream camera 0")
+	log.Println("  GET /camera/1      - Stream camera 1") 
+	log.Println("  GET /status/0      - Camera 0 status")
+	log.Println("  GET /status/1      - Camera 1 status")
+	log.Println("  GET /discover      - Rediscover cameras")
 
 	// Wait for shutdown signal
 	<-sigs

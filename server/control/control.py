@@ -152,5 +152,5 @@ cleanup_thread.start()
 
 if __name__ == "__main__":
     print("Starting Simple Robot Server...")
-    print("Server will run on http://localhost:8080")
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    print("Server will run on http://localhost:2000")
+    uvicorn.run(app, host="0.0.0.0", port=2000)
