@@ -199,7 +199,7 @@ def run():
 
     # Opsi 1: Jika file server.py ada di server/control
     p.add_process("camera_server", "cd server/camera/camera_v2_go/ && bash run_server.sh", True, None)
-    p.add_process("controller_server", "cd server/control && python -m uvicorn server:app --host 0.0.0.0 --port 2000 --workers 1", True, None)
+    p.add_process("controller_server", "cd server/control && python3 -m uvicorn server:app --host 0.0.0.0 --port 2000 --workers 1", True, None)
     p.add_process("server_tranceiver", "cd server/tranceiver && go run main.go", True, None)
 
     p.run()
