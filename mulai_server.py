@@ -3,6 +3,7 @@ import time
 import threading
 import signal
 import sys
+import os
 
 class ProcessInfo:
     def __init__(self, name, command, autorestart, max_restarts):
@@ -181,9 +182,25 @@ class ParallelRunner:
 def run():
     p = ParallelRunner()
 
+    # Cek struktur direktori terlebih dahulu
+    base_dir = os.getcwd()
+    print("Current working directory:", base_dir)
+    
+    # Cek apakah file server.py ada di server/control
+    control_server_path = os.path.join(base_dir, "server", "control", "server.py")
+    if os.path.exists(control_server_path):
+        print("✓ server.py found at:", control_server_path)
+    else:
+        print("✗ server.py NOT found at:", control_server_path)
+        # List files di direktori control untuk debugging
+        control_dir = os.path.join(base_dir, "server", "control")
+        if os.path.exists(control_dir):
+            print("Files in control directory:", os.listdir(control_dir))
+
+    # Opsi 1: Jika file server.py ada di server/control
     p.add_process("camera_server", "cd server/camera/camera_v2_go/ && bash run_server.sh", True, None)
-    p.add_process("controller_server", "cd server/control && uvicorn server:app --host 0.0.0.0 --port 2000 --workers 2", True, None)
-    p.add_process("server_tranceiver", "go run server/tranceiver/main.go", True, None)
+    p.add_process("controller_server", "cd server/control && python -m uvicorn server:app --host 0.0.0.0 --port 2000 --workers 1", True, None)
+    p.add_process("server_tranceiver", "cd server/tranceiver && go run main.go", True, None)
 
     p.run()
 
