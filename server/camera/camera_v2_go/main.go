@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -34,36 +33,6 @@ type StreamingServer struct {
 	httpServer *http.Server
 }
 
-func getCameraList() ([]CameraInfo, error) {
-	cmd := exec.Command("bash", "get_camera.sh")
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-
-	// Parse JSON from the last line
-	lines := string(output)
-	var jsonLine string
-	for i := len(lines) - 1; i >= 0; i-- {
-		if lines[i] == '\n' {
-			jsonLine = lines[i+1:]
-			break
-		}
-	}
-
-	if jsonLine == "" {
-		jsonLine = lines
-	}
-
-	var cameras []CameraInfo
-	err = json.Unmarshal([]byte(jsonLine), &cameras)
-	if err != nil {
-		return nil, err
-	}
-
-	return cameras, nil
-}
-
 func NewCameraStream(devicePath, product string) *CameraStream {
 	return &CameraStream{
 		devicePath: devicePath,
@@ -77,18 +46,18 @@ func (cs *CameraStream) Initialize() error {
 	
 	cam, err := webcam.Open(cs.devicePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open camera %s: %v", cs.devicePath, err)
 	}
 	cs.cam = cam
 
-	// Try to set 1280x720 resolution
+	// Try MJPEG first, then YUYV as fallback
 	_, _, _, err = cs.cam.SetImageFormat(webcam.PixelFormat(1196444237), 1280, 720) // MJPEG
 	if err != nil {
-		// Try YUYV as fallback
+		log.Printf("MJPEG not supported, trying YUYV: %v", err)
 		_, _, _, err = cs.cam.SetImageFormat(webcam.PixelFormat(1448695129), 1280, 720) // YUYV
 		if err != nil {
 			cam.Close()
-			return err
+			return fmt.Errorf("failed to set image format: %v", err)
 		}
 	}
 
@@ -103,7 +72,7 @@ func (cs *CameraStream) Initialize() error {
 	}
 
 	cs.running = true
-	log.Printf("Camera %s initialized successfully", cs.devicePath)
+	log.Printf("Camera %s initialized successfully: 1280x720 @ 30fps", cs.devicePath)
 	return nil
 }
 
@@ -139,17 +108,11 @@ func (cs *CameraStream) Close() {
 	}
 }
 
-func NewStreamingServer() *StreamingServer {
-	// Get camera list from shell script
-	cameras, err := getCameraList()
-	if err != nil {
-		log.Fatalf("Failed to get camera list: %v", err)
-	}
-
+func NewStreamingServer(cameraList []CameraInfo) *StreamingServer {
 	server := &StreamingServer{}
 
 	// Initialize cameras
-	for i, camera := range cameras {
+	for i, camera := range cameraList {
 		if i >= 2 {
 			break
 		}
@@ -162,6 +125,7 @@ func NewStreamingServer() *StreamingServer {
 		}
 		server.cameras[i] = stream
 		stream.StartCapture()
+		time.Sleep(500 * time.Millisecond) // Stagger initialization
 	}
 
 	return server
@@ -180,19 +144,21 @@ func (ss *StreamingServer) GenerateMJPEG(cameraID int) gin.HandlerFunc {
 		c.Writer.Header().Set("Expires", "0")
 
 		camera := ss.cameras[cameraID]
+		frameInterval := time.Second / 30 // 30 FPS
+		ticker := time.NewTicker(frameInterval)
+		defer ticker.Stop()
 
 		for {
 			select {
 			case <-c.Request.Context().Done():
 				return
-			default:
+			case <-ticker.C:
 				frame := camera.GetFrame()
 				if frame != nil {
 					c.Writer.Write([]byte("--frame\r\nContent-Type: image/jpeg\r\n\r\n"))
 					c.Writer.Write(frame)
 					c.Writer.Write([]byte("\r\n\r\n"))
 				}
-				time.Sleep(33 * time.Millisecond) // ~30 FPS
 			}
 		}
 	}
@@ -201,6 +167,7 @@ func (ss *StreamingServer) GenerateMJPEG(cameraID int) gin.HandlerFunc {
 func (ss *StreamingServer) SetupRoutes() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
+	router.Use(gin.Recovery())
 
 	// Root endpoint
 	router.GET("/", func(c *gin.Context) {
@@ -224,16 +191,6 @@ func (ss *StreamingServer) SetupRoutes() *gin.Engine {
 	// Streaming endpoints
 	router.GET("/camera/0", ss.GenerateMJPEG(0))
 	router.GET("/camera/1", ss.GenerateMJPEG(1))
-
-	// Camera list endpoint
-	router.GET("/cameras", func(c *gin.Context) {
-		cameras, err := getCameraList()
-		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(200, cameras)
-	})
 
 	return router
 }
@@ -265,11 +222,32 @@ func (ss *StreamingServer) Shutdown() {
 }
 
 func main() {
+	// Check if camera list is provided as argument
+	if len(os.Args) < 2 {
+		log.Fatal("Usage: ./dual-camera-streamer '<camera_json_array>'")
+	}
+
+	// Parse camera list from command line argument
+	var cameras []CameraInfo
+	err := json.Unmarshal([]byte(os.Args[1]), &cameras)
+	if err != nil {
+		log.Fatalf("Failed to parse camera list: %v", err)
+	}
+
+	if len(cameras) == 0 {
+		log.Fatal("No cameras provided")
+	}
+
+	log.Printf("Loaded %d cameras from command line", len(cameras))
+	for i, cam := range cameras {
+		log.Printf("Camera %d: %s (%s)", i, cam.Device, cam.Product)
+	}
+
 	// Setup signal handling
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	server := NewStreamingServer()
+	server := NewStreamingServer(cameras)
 
 	// Start server
 	go func() {
@@ -283,7 +261,6 @@ func main() {
 	log.Println("  GET /         - Server info") 
 	log.Println("  GET /camera/0 - Stream camera 0")
 	log.Println("  GET /camera/1 - Stream camera 1")
-	log.Println("  GET /cameras  - List detected cameras")
 
 	// Wait for shutdown signal
 	<-sigs
