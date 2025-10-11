@@ -3,10 +3,9 @@ import time
 import threading
 import signal
 import sys
-from typing import List, Dict, Optional
 
 class ProcessInfo:
-    def __init__(self, name: str, command: str, autorestart: bool, max_restarts: Optional[int]):
+    def __init__(self, name, command, autorestart, max_restarts):
         self.name = name
         self.command = command
         self.autorestart = autorestart
@@ -18,7 +17,7 @@ class ProcessInfo:
 
 class ParallelRunner:
     def __init__(self):
-        self.processes: Dict[str, ProcessInfo] = {}
+        self.processes = {}
         self.running = False
         self.lock = threading.Lock()
         
@@ -28,10 +27,10 @@ class ParallelRunner:
     
     def signal_handler(self, signum, frame):
         """Handle shutdown signals"""
-        print(f"\nReceived signal {signum}, shutting down...")
+        print("\nReceived signal {}, shutting down...".format(signum))
         self.stop_all()
     
-    def add_process(self, name: str, command: str, autorestart: bool = True, max_restarts: Optional[int] = None):
+    def add_process(self, name, command, autorestart=True, max_restarts=None):
         """Add a process to be managed
         
         Args:
@@ -42,16 +41,17 @@ class ParallelRunner:
         """
         with self.lock:
             if name in self.processes:
-                raise ValueError(f"Process with name '{name}' already exists")
+                raise ValueError("Process with name '{}' already exists".format(name))
             
             self.processes[name] = ProcessInfo(name, command, autorestart, max_restarts)
-            print(f"Added process: {name} - Command: {command} - Auto-restart: {autorestart} - Max restarts: {max_restarts}")
+            print("Added process: {} - Command: {} - Auto-restart: {} - Max restarts: {}".format(
+                name, command, autorestart, max_restarts))
     
-    def _run_process(self, proc_info: ProcessInfo):
+    def _run_process(self, proc_info):
         """Run a single process in a thread"""
         while self.running and proc_info.running:
             try:
-                print(f"[{proc_info.name}] Starting process...")
+                print("[{}] Starting process...".format(proc_info.name))
                 proc_info.process = subprocess.Popen(
                     proc_info.command,
                     shell=True,
@@ -64,36 +64,38 @@ class ParallelRunner:
                 while proc_info.process.poll() is None and proc_info.running:
                     output = proc_info.process.stdout.readline()
                     if output:
-                        print(f"[{proc_info.name}] {output.strip()}")
+                        print("[{}] {}".format(proc_info.name, output.strip()))
                 
                 # Get remaining output
                 for output in proc_info.process.stdout:
                     if output.strip():
-                        print(f"[{proc_info.name}] {output.strip()}")
+                        print("[{}] {}".format(proc_info.name, output.strip()))
                 
                 return_code = proc_info.process.wait()
                 
                 if return_code == 0:
-                    print(f"[{proc_info.name}] Process completed successfully")
+                    print("[{}] Process completed successfully".format(proc_info.name))
                     break
                 else:
-                    print(f"[{proc_info.name}] Process exited with code {return_code}")
+                    print("[{}] Process exited with code {}".format(proc_info.name, return_code))
                     
                     if not proc_info.autorestart:
-                        print(f"[{proc_info.name}] Auto-restart disabled, not restarting")
+                        print("[{}] Auto-restart disabled, not restarting".format(proc_info.name))
                         break
                     
                     if proc_info.max_restarts is not None:
                         proc_info.restart_count += 1
                         if proc_info.restart_count >= proc_info.max_restarts:
-                            print(f"[{proc_info.name}] Maximum restart limit ({proc_info.max_restarts}) reached")
+                            print("[{}] Maximum restart limit ({}) reached".format(
+                                proc_info.name, proc_info.max_restarts))
                             break
                     
-                    print(f"[{proc_info.name}] Restarting... (attempt {proc_info.restart_count + 1})")
+                    print("[{}] Restarting... (attempt {})".format(
+                        proc_info.name, proc_info.restart_count + 1))
                     time.sleep(2)  # Wait before restarting
                     
             except Exception as e:
-                print(f"[{proc_info.name}] Error: {e}")
+                print("[{}] Error: {}".format(proc_info.name, e))
                 
                 if not proc_info.autorestart:
                     break
@@ -101,14 +103,16 @@ class ParallelRunner:
                 if proc_info.max_restarts is not None:
                     proc_info.restart_count += 1
                     if proc_info.restart_count >= proc_info.max_restarts:
-                        print(f"[{proc_info.name}] Maximum restart limit ({proc_info.max_restarts}) reached")
+                        print("[{}] Maximum restart limit ({}) reached".format(
+                            proc_info.name, proc_info.max_restarts))
                         break
                 
-                print(f"[{proc_info.name}] Restarting after error... (attempt {proc_info.restart_count + 1})")
+                print("[{}] Restarting after error... (attempt {})".format(
+                    proc_info.name, proc_info.restart_count + 1))
                 time.sleep(2)
         
         proc_info.running = False
-        print(f"[{proc_info.name}] Process thread stopped")
+        print("[{}] Process thread stopped".format(proc_info.name))
     
     def run(self):
         """Start all processes"""
@@ -117,7 +121,7 @@ class ParallelRunner:
             return
         
         self.running = True
-        print(f"Starting {len(self.processes)} processes...")
+        print("Starting {} processes...".format(len(self.processes)))
         
         # Start all processes
         for proc_info in self.processes.values():
@@ -155,14 +159,14 @@ class ParallelRunner:
         for proc_info in self.processes.values():
             proc_info.running = False
             if proc_info.process and proc_info.process.poll() is None:
-                print(f"[{proc_info.name}] Terminating process...")
+                print("[{}] Terminating process...".format(proc_info.name))
                 proc_info.process.terminate()
                 
                 # Wait for process to terminate
                 try:
                     proc_info.process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    print(f"[{proc_info.name}] Force killing process...")
+                    print("[{}] Force killing process...".format(proc_info.name))
                     proc_info.process.kill()
         
         # Wait for threads to finish
@@ -172,44 +176,12 @@ class ParallelRunner:
         
         print("All processes stopped")
 
-def main():
-    """Example usage"""
-    runner = ParallelRunner()
-    
-    # Add processes with different configurations
-    runner.add_process(
-        "web_server", 
-        "python -m http.server 8000", 
-        autorestart=True, 
-        max_restarts=3
-    )
-    
-    runner.add_process(
-        "long_running", 
-        "python -c \"import time; i=0; while True: print(f'Running {i}'); i+=1; time.sleep(1)\"", 
-        autorestart=True, 
-        max_restarts=None  # Infinite restarts
-    )
-    
-    runner.add_process(
-        "one_shot", 
-        "python -c \"print('One shot task'); exit(0)\"", 
-        autorestart=False, 
-        max_restarts=None
-    )
-    
-    # Start the runner
-    runner.run()
-
-
-
-
 
 def run():
     p = ParallelRunner()
 
-    p.add_process("camera_server", "bash server/camera/camera_v2_go/run_server.sh")
-    p.add_process("controller_server", "cd server/control && uvicorn server:app --host 0.0.0.0 --port 2000 --workers 4")
+    p.add_process("camera_server", "bash server/camera/camera_v2_go/run_server.sh", True, None)
+    p.add_process("controller_server", "cd server/control && uvicorn server:app --host 0.0.0.0 --port 2000 --workers 4", True, None)
     p.add_process("server_tranceiver", "go run server/tranceiver/main.go", True, None)
 
     p.run()
