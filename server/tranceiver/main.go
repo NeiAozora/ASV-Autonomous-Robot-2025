@@ -9,7 +9,7 @@ import (
 
 func main() {
 	// Ports tujuan untuk forwarding
-	targetPorts := []int{1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000}
+	targetPorts := []int{8100, 8200, 8300, 8400, 8500, 8600, 8700, 8800}
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
