@@ -128,9 +128,10 @@ class ParallelRunner:
             proc_info.running = True
             proc_info.thread = threading.Thread(
                 target=self._run_process, 
-                args=(proc_info,),
-                daemon=True
+                args=(proc_info,)
             )
+            # Set daemon menggunakan method setDaemon() untuk kompatibilitas Python lama
+            proc_info.thread.setDaemon(True)
             proc_info.thread.start()
         
         print("All processes started. Press Ctrl+C to stop.")
