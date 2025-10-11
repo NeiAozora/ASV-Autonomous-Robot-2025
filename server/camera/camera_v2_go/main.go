@@ -252,12 +252,12 @@ func main() {
 
 	// Start server
 	go func() {
-		if err := server.Start(":8080"); err != nil && err != http.ErrServerClosed {
+		if err := server.Start(":1000"); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server error: %v", err)
 		}
 	}()
 
-	log.Println("Server started on :8080")
+	log.Println("Server started on :1000")
 	log.Println("Endpoints:")
 	log.Println("  GET /         - Server info") 
 	log.Println("  GET /camera/0 - Stream camera 0")
