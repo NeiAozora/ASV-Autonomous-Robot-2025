@@ -189,9 +189,9 @@ def run():
     # Cek apakah file server.py ada di server/control
     control_server_path = os.path.join(base_dir, "server", "control", "server.py")
     if os.path.exists(control_server_path):
-        print("✓ server.py found at:", control_server_path)
+        print("server.py found at:", control_server_path)
     else:
-        print("✗ server.py NOT found at:", control_server_path)
+        print("server.py NOT found at:", control_server_path)
         # List files di direktori control untuk debugging
         control_dir = os.path.join(base_dir, "server", "control")
         if os.path.exists(control_dir):
