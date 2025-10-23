@@ -54,7 +54,6 @@ func NewManager(cameraList []CameraInfo) *Manager {
 }
 
 // StartCamera will spawn a gst-rtsp-server test-launch process for the given camera index.
-// It uses Jetson hardware encoder nvv4l2h264enc in the pipeline.
 func (m *Manager) StartCamera(idx int) error {
 	m.lock.Lock()
 	cp, ok := m.cameras[idx]
@@ -70,23 +69,20 @@ func (m *Manager) StartCamera(idx int) error {
 		return fmt.Errorf("camera %d already started", idx)
 	}
 
-	// Build GStreamer pipeline string. Adjust width/height/framerate/bitrate as needed.
-	// If you use CSI camera (nvarguscamerasrc), change the src element accordingly.
+	// Build GStreamer pipeline string using Jetson hardware encoder (adjust device/pipeline as needed)
 	pipeline := fmt.Sprintf("( v4l2src device=%s ! video/x-raw,width=1280,height=720,framerate=30/1 ! nvvidconv ! 'video/x-raw(memory:NVMM),format=NV12' ! nvv4l2h264enc bitrate=2000000 ! h264parse ! rtph264pay name=pay0 pt=96 )", cp.info.Device)
 
-	// test-launch is the sample binary from gst-rtsp-server repo that runs a pipeline as RTSP server.
-	// If you don't have test-launch, install gst-rtsp-server or change this to another method.
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, "test-launch", pipeline)
-	// send stdout/stderr to files for debugging
+
+	// Prepare logs directory
 	logDir := "./logs"
-	os.MkdirAll(logDir, 0755)
+	_ = os.MkdirAll(logDir, 0755)
 	stdoutFile, _ := os.OpenFile(filepath.Join(logDir, fmt.Sprintf("cam%d_stdout.log", idx)), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	stderrFile, _ := os.OpenFile(filepath.Join(logDir, fmt.Sprintf("cam%d_stderr.log", idx)), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
 
-	// Start the process
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return fmt.Errorf("failed to start test-launch for camera %d: %w", idx, err)
@@ -97,7 +93,6 @@ func (m *Manager) StartCamera(idx int) error {
 	cp.startedAt = time.Now()
 	cp.restarts = 0
 
-	// Monitor in goroutine: wait for exit and cleanup
 	go func(index int, p *CameraProcess, stdout, stderr *os.File) {
 		err := cmd.Wait()
 		stdout.Close()
@@ -116,7 +111,7 @@ func (m *Manager) StartCamera(idx int) error {
 		}
 	}(idx, cp, stdoutFile, stderrFile)
 
-	// Small sleep to let RTSP server up (could poll the RTSP URL in production)
+	// small delay to let RTSP server come up (in production replace with RTSP health check)
 	time.Sleep(400 * time.Millisecond)
 
 	log.Printf("Started camera %d -> %s (pipeline: %s)", idx, cp.rtspPath, pipeline)
@@ -138,12 +133,10 @@ func (m *Manager) StopCamera(idx int) error {
 		return fmt.Errorf("camera %d not running", idx)
 	}
 
-	// Graceful shutdown via cancel func
 	if cp.cancelFunc != nil {
 		cp.cancelFunc()
 	}
 
-	// give it a short time, then kill
 	done := make(chan struct{})
 	go func() {
 		cp.cmd.Wait()
@@ -154,7 +147,7 @@ func (m *Manager) StopCamera(idx int) error {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		if cp.cmd.Process != nil {
-			cp.cmd.Process.Kill()
+			_ = cp.cmd.Process.Kill()
 		}
 	}
 
@@ -186,16 +179,27 @@ func (m *Manager) Status() []gin.H {
 }
 
 func main() {
-	// Example: read camera list JSON from env or args; for simplicity we hardcode two cameras here.
-	// Replace this with parsing os.Args or config file as you originally had.
-	cameraList := []CameraInfo{
-		{Device: "/dev/video0", Product: "usbcam0"},
-		{Device: "/dev/video1", Product: "usbcam1"},
+	// read camera list JSON from command line argument (same behaviour as kode asli)
+	if len(os.Args) < 2 {
+		log.Fatalf("Usage: %s '<camera_json_array>'\nExample: %s '[{\"device\":\"/dev/video0\",\"product\":\"cam0\"}]'", os.Args[0], os.Args[0])
+	}
+
+	var cameraList []CameraInfo
+	if err := json.Unmarshal([]byte(os.Args[1]), &cameraList); err != nil {
+		log.Fatalf("Failed to parse camera JSON argument: %v\nProvided JSON: %s", err, os.Args[1])
+	}
+	if len(cameraList) == 0 {
+		log.Fatal("No cameras provided in JSON argument")
+	}
+
+	log.Printf("Loaded %d cameras from command line", len(cameraList))
+	for i, cam := range cameraList {
+		log.Printf("Camera %d: %s (%s)", i, cam.Device, cam.Product)
 	}
 
 	manager := NewManager(cameraList)
 
-	// Optionally: auto-start all cameras at boot
+	// optionally auto-start all cameras at boot
 	for i := range cameraList {
 		if err := manager.StartCamera(i); err != nil {
 			log.Printf("warning: failed to autostart camera %d: %v", i, err)
@@ -247,7 +251,6 @@ func main() {
 		c.JSON(200, gin.H{"rtsp": cp.rtspPath})
 	})
 
-	// start HTTP server
 	httpSrv := &http.Server{
 		Addr:    ":8100",
 		Handler: r,
