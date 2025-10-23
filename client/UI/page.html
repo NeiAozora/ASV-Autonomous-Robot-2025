@@ -494,253 +494,402 @@
     </div>
 
     <script>
-        /**
-         * Mengatur skala dan posisi konten agar pas di dalam jendela browser
-         * tanpa menyebabkan scroll, mempertahankan rasio aspek.
-         * Konten akan menempel di sisi kiri dan terpusat secara vertikal.
-         */
-        function scaleContent() {
-            const wrapper = document.getElementById('desktop-app-wrapper');
-            const appWidth = 2067; // Updated width
-            const appHeight = 1024; // Tinggi desain asli (piksel)
+/**
+ * SCRIPT: Integrasi server (fetch) — TANPA MENGUBAH CSS / SIZING
+ * Salin-tempel ganti <script> lama Anda dengan skrip ini.
+ * Pastikan API_BASE sesuai server (default: http://localhost:8000/api).
+ */
 
-            const viewportWidth = window.innerWidth;
-            const viewportHeight = window.innerHeight;
+/* === CONFIG === */
+const API_BASE = "http://localhost:8000/api";
+const DASHBOARD_POLL_MS = 300;
 
-            // Hitung faktor skala yang dibutuhkan untuk lebar dan tinggi
-            const scaleX = viewportWidth / appWidth;
-            const scaleY = viewportHeight / appHeight;
 
-            // Gunakan skala terkecil untuk memastikan seluruh konten pas di viewport
-            // tanpa menyebabkan scroll, sambil mempertahankan rasio aspek.
-            const scale = Math.min(scaleX, scaleY);
 
-            // Terapkan transformasi skala
-            wrapper.style.transform = `scale(${scale})`;
-            wrapper.style.transformOrigin = `top left`; // Skala dari sudut kiri atas
+/* === PING / LOADING POPUP LOGIC (tambah ke JS existing) === */
+const PING_INTERVAL_MS = 3000;   // ping setiap 3 detik
+const PING_TIMEOUT_MS = 1500;    // timeout tiap ping (1.5s) - sesuaikan jika perlu
 
-            // Hitung tinggi yang diskalakan untuk pemosisian vertikal
-            const scaledHeight = appHeight * scale;
+let _pingIntervalId = null;
+let _isLoadingPopupVisible = false;
 
-            // Posisi X: Selalu lengket ke kiri (0px dari tepi viewport)
-            const offsetX = 0;
-            // Posisi Y: Pusatkan secara vertikal
-            const offsetY = (viewportHeight - scaledHeight) / 2;
+/**
+ * Show/hide loading popup safely without touching external CSS rules.
+ * Menggunakan inline style display untuk tidak merusak stylesheet.
+ */
+function setLoadingPopupVisible(visible) {
+    const el = document.getElementById('loading-popup');
+    if (!el) return;
+    if (visible) {
+        // gunakan flex sesuai struktur HTML (popup awal bergaya flex)
+        el.style.display = 'flex';
+        // pointer-events tetap sesuai kelas (pointer-events-none) — jika diperlukan enable, ubah class tambahan.
+    } else {
+        el.style.display = 'none';
+    }
+    _isLoadingPopupVisible = !!visible;
+}
 
-            // Terapkan posisi absolut
-            wrapper.style.left = `${offsetX}px`;
-            wrapper.style.top = `${offsetY}px`;
+/**
+ * Lakukan satu kali ping ke server.
+ * Menggunakan fetchJson helper yang sudah ada (memiliki timeout argumen).
+ * Returns boolean: true = reachable, false = not reachable
+ */
+async function pingServerOnce() {
+    try {
+        // gunakan endpoint ping ringan
+        const resp = await fetchJson(`${API_BASE}/ping`, {}, PING_TIMEOUT_MS);
+        // jika response valid dan status ok => server reachable
+        if (resp && resp.status === 'ok') {
+            return true;
+        }
+        // fallback: jika resp ada tetapi bukan status ok, treat as failure
+        return false;
+    } catch (err) {
+        // fetch error / timeout / network down
+        return false;
+    }
+}
 
-            // Skalakan juga posisi popup agar tetap di pojok kanan bawah yang terlihat
-            const loadingPopup = document.getElementById('loading-popup');
-            // Loading popup sudah fixed position, jadi tidak perlu penyesuaian khusus
+/**
+ * Start continuous ping loop. Menampilkan popup jika gagal.
+ * Idempotent: memeriksa _pingIntervalId untuk menghindari multiple intervals.
+ */
+function startPingLoop() {
+    if (_pingIntervalId) return; // sudah jalan
+    // pastikan popup tersembunyi saat mulai (tidak merusak CSS)
+    setLoadingPopupVisible(false);
+
+    // lakukan ping segera sekali lalu interval
+    (async () => {
+        const ok = await pingServerOnce();
+        setLoadingPopupVisible(!ok);
+    })();
+
+    _pingIntervalId = setInterval(async () => {
+        const ok = await pingServerOnce();
+        // jika gagal => tampilkan popup; jika berhasil => sembunyikan popup
+        if (!ok && !_isLoadingPopupVisible) {
+            setLoadingPopupVisible(true);
+        } else if (ok && _isLoadingPopupVisible) {
+            setLoadingPopupVisible(false);
+        }
+    }, PING_INTERVAL_MS);
+}
+
+/**
+ * Stop ping loop (dipanggil saat unload jika ingin bersih)
+ */
+function stopPingLoop() {
+    if (_pingIntervalId) {
+        clearInterval(_pingIntervalId);
+        _pingIntervalId = null;
+    }
+}
+
+
+
+/* === scaleContent: KEMBALIKAN PERSIS seperti asli (tidak merusak sizing) === */
+function scaleContent() {
+    const wrapper = document.getElementById('desktop-app-wrapper');
+    const appWidth = 2067; // Updated width
+    const appHeight = 1024; // Tinggi desain asli (piksel)
+
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    // Hitung faktor skala yang dibutuhkan untuk lebar dan tinggi
+    const scaleX = viewportWidth / appWidth;
+    const scaleY = viewportHeight / appHeight;
+
+    // Gunakan skala terkecil untuk memastikan seluruh konten pas di viewport
+    // tanpa menyebabkan scroll, sambil mempertahankan rasio aspek.
+    const scale = Math.min(scaleX, scaleY);
+
+    // Terapkan transformasi skala
+    wrapper.style.transform = `scale(${scale})`;
+    wrapper.style.transformOrigin = `top left`; // Skala dari sudut kiri atas
+
+    // Hitung tinggi yang diskalakan untuk pemosisian vertikal
+    const scaledHeight = appHeight * scale;
+
+    // Posisi X: Selalu lengket ke kiri (0px dari tepi viewport)
+    const offsetX = 0;
+    // Posisi Y: Pusatkan secara vertikal
+    const offsetY = (viewportHeight - scaledHeight) / 2;
+
+    // Terapkan posisi absolut
+    wrapper.style.left = `${offsetX}px`;
+    wrapper.style.top = `${offsetY}px`;
+
+    // Loading popup tetap fixed; tidak diubah di sini
+}
+
+/* === helper fetch dengan timeout === */
+async function fetchJson(url, opts = {}, timeoutMs = 5000) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const res = await fetch(url, { signal: controller.signal, ...opts });
+        clearTimeout(id);
+        if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(`HTTP ${res.status} ${res.statusText} ${text}`);
+        }
+        return await res.json();
+    } catch (err) {
+        clearTimeout(id);
+        throw err;
+    }
+}
+
+/* === SPA navigation (ASLI) === */
+function showPage(pageId) {
+    const pages = ['dashboard-page', 'daftar-foto-page'];
+    pages.forEach(id => {
+        const page = document.getElementById(id);
+        if (page) page.classList.add('hidden');
+    });
+
+    const activePage = document.getElementById(pageId);
+    if (activePage) activePage.classList.remove('hidden');
+
+    // Update active state for sidebar buttons
+    const buttons = document.querySelectorAll('.sidebar-button');
+    buttons.forEach(button => {
+        button.classList.remove('active');
+        if (button.id === `${pageId.replace('-page', '')}-btn`) {
+            button.classList.add('active');
+        }
+    });
+}
+
+/* === Ambil data dashboard dari server dan update DOM === */
+async function fetchDashboardData() {
+    try {
+        const data = await fetchJson(`${API_BASE}/dashboard`);
+        if (!data) return;
+
+        // GPS
+        document.getElementById('gps-latitude').textContent = data.gps_latitude ?? "XXXXXXX";
+        document.getElementById('gps-longitude').textContent = data.gps_longitude ?? "XXXXXXX";
+
+        // Power
+        document.getElementById('battery-level').textContent = data.battery_level ?? "0.0";
+        document.getElementById('voltage').textContent = data.voltage ?? "0";
+        document.getElementById('current').textContent = data.current ?? "0.00000";
+
+        // SOG/COG
+        document.getElementById('sog-knots').textContent = data.sog_knots ?? "00";
+        document.getElementById('sog-kmh').textContent = data.sog_kmh ?? "00";
+        document.getElementById('cog-knots').textContent = data.cog_knots ?? "00";
+        document.getElementById('cog-kmh').textContent = data.cog_kmh ?? "00";
+
+        // Heading + compass rotation (tidak menyentuh wrapper transform)
+        document.getElementById('heading-text').textContent = `${data.heading ?? 0}°`;
+        const compassImageContainer = document.getElementById('compass-image-container');
+        if (compassImageContainer && typeof data.heading !== 'undefined') {
+            // Set transform to rotate only — safe karena parent (wrapper) sudah diskalakan secara terpisah.
+            compassImageContainer.style.transform = `rotate(${data.heading}deg)`;
         }
 
-        // --- Single Page Application (SPA) Logic ---
-        function showPage(pageId) {
-            const pages = ['dashboard-page', 'daftar-foto-page'];
-            pages.forEach(id => {
-                const page = document.getElementById(id);
-                if (page) {
-                    page.classList.add('hidden');
-                }
-            });
+        // Logs
+        document.getElementById('log-kamera-atas').textContent = data.log_kamera_atas ?? "-";
+        document.getElementById('log-kamera-bawah').textContent = data.log_kamera_bawah ?? "-";
 
-            const activePage = document.getElementById(pageId);
-            if (activePage) {
-                activePage.classList.remove('hidden');
-            }
-
-            // Update active state for sidebar buttons
-            const buttons = document.querySelectorAll('.sidebar-button');
-            buttons.forEach(button => {
-                button.classList.remove('active');
-                if (button.id === `${pageId.replace('-page', '')}-btn`) {
-                    button.classList.add('active');
-                }
-            });
+        // Trajectory mode radios (A/B)
+        if (data.trajectory_mode) {
+            const tm = data.trajectory_mode.toString().toLowerCase();
+            const el = document.getElementById(`trajectory-mode-${tm}`);
+            if (el) el.checked = true;
+            document.getElementById('lintasan-ab-header').textContent = `Lintasan ${data.trajectory_mode}`;
         }
 
-        // Function to generate random data for demonstration
-        function generateRandomData() {
-            const lat = (Math.random() * 180 - 90).toFixed(6); // -90 to 90
-            const lon = (Math.random() * 360 - 180).toFixed(6); // -180 to 180
-            const battery = (Math.random() * 100).toFixed(1);
-            const voltage = (Math.random() * 3 + 3).toFixed(1); // 3V to 6V
-            const current = (Math.random() * 0.5 + 0.1).toFixed(5); // 0.1A to 0.6A
-            const sogKnots = (Math.random() * 20).toFixed(1);
-            const cogKnots = (Math.random() * 360).toFixed(1);
-            const heading = (Math.random() * 360).toFixed(0); // Heading for rotation
-
-            // For log messages
-            const currentTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-            const logKameraAtas = `TipeLintasan_Atas_Hijau_${currentTime.replace(':', '_')}.jpg`;
-            const logKameraBawah = Math.random() > 0.5 ? `TipeLintasan_Bawah_Hijau_${currentTime.replace(':', '_')}.jpg` : "Menuggu....";
-
-            // For radio buttons
-            const trajectoryMode = Math.random() < 0.5 ? 'A' : 'B';
-            const currentStateOptions = ['Belum Mulai', 'Start', 'Perjalanan', 'Finish'];
-            const currentState = currentStateOptions[Math.floor(Math.random() * currentStateOptions.length)];
-
-            return { lat, lon, battery, voltage, current, sogKnots, cogKnots, heading, logKameraAtas, logKameraBawah, trajectoryMode, currentState };
-        }
-
-        // Function to refresh dashboard data
-        function refreshDashboardData() {
-            const data = generateRandomData();
-
-            // Update GPS
-            document.getElementById('gps-latitude').textContent = data.lat;
-            document.getElementById('gps-longitude').textContent = data.lon;
-
-            // Update Battery, Voltage, Current
-            document.getElementById('battery-level').textContent = data.battery;
-            document.getElementById('voltage').textContent = data.voltage;
-            document.getElementById('current').textContent = data.current;
-
-            // Update SOG/COG
-            document.getElementById('sog-knots').textContent = data.sogKnots;
-            document.getElementById('sog-kmh').textContent = (data.sogKnots * 1.852).toFixed(1); // Convert knots to km/h
-            document.getElementById('cog-knots').textContent = data.cogKnots;
-            document.getElementById('cog-kmh').textContent = (data.cogKnots * 1.852).toFixed(1);
-
-            // Update Compass Heading text
-            document.getElementById('heading-text').textContent = `${data.heading}°`;
-
-            // Rotate Compass Image
-            const compassImageContainer = document.getElementById('compass-image-container');
-            if (compassImageContainer) {
-                compassImageContainer.style.transform = `rotate(${data.heading}deg)`;
-            }
-
-            // Update Footer Logs
-            document.getElementById('log-kamera-atas').textContent = data.logKameraAtas;
-            document.getElementById('log-kamera-bawah').textContent = data.logKameraBawah;
-
-            // Update Trajectory Mode radio buttons
-            document.getElementById(`trajectory-mode-${data.trajectoryMode.toLowerCase()}`).checked = true;
-            // Update "Lintasan A/B" header based on selected mode
-            document.getElementById('lintasan-ab-header').textContent = `Lintasan ${data.trajectoryMode}`;
-
-            // Update Current State radio buttons
-            // Deselect all current state radios first
-            document.querySelectorAll('input[name="current_state"]').forEach(radio => radio.checked = false);
-            // Then select the new random one
-            const stateId = `current-state-${data.currentState.toLowerCase().replace(' ', '-')}`;
+        // Current state radios
+        if (data.current_state) {
+            document.querySelectorAll('input[name="current_state"]').forEach(r => r.checked = false);
+            const stateId = `current-state-${data.current_state.toString().toLowerCase().replace(/\s+/g, '-')}`;
             const stateRadio = document.getElementById(stateId);
-            if (stateRadio) {
-                stateRadio.checked = true;
-            }
+            if (stateRadio) stateRadio.checked = true;
         }
 
-        // --- Restart Confirmation Popup Logic ---
-        function showRestartPopup() {
-            const selectedMode = document.querySelector('input[name="trajectory_mode"]:checked').value;
-            const popupMessage = document.getElementById('restart-popup-message');
-            popupMessage.textContent = `Apakah anda yakin ingin memulai dari awal di mode lintasan ${selectedMode}?`;
-            
-            // Show the popup with proper animation
-            const popupOverlay = document.getElementById('restart-popup-overlay');
-            popupOverlay.classList.add('visible');
-        }
+    } catch (err) {
+        console.error("fetchDashboardData error:", err);
+        // jangan merusak UI sizing; tampilkan fallback teks singkat (DOM tetap utuh)
+        // contoh fallback pada elemen tertentu (opsional)
+        // document.getElementById('log-kamera-bawah').textContent = "Error connecting";
+    }
+}
 
-        function hideRestartPopup() {
-            const popupOverlay = document.getElementById('restart-popup-overlay');
-            popupOverlay.classList.remove('visible');
-        }
+/* === Ambil daftar foto dari server dan render (Daftar Foto) === */
+async function fetchPhotoList() {
+    try {
+        const resp = await fetchJson(`${API_BASE}/photos`);
+        const container = document.getElementById('photo-entries-container');
+        if (!container) return;
+        container.innerHTML = ""; // clear existing entries but preserve container sizing/styles
 
-        function handleRestartConfirm() {
-            console.log("Restart dikonfirmasi!");
-            // Implement actual restart logic here
-            refreshDashboardData(); // For demonstration, refresh data on restart
-            hideRestartPopup();
-        }
-
-        function handleRestartCancel() {
-            console.log("Restart dibatalkan.");
-            hideRestartPopup();
-        }
-
-        // --- Video Streaming Logic ---
-        function setupVideoStreams() {
-            // Simulate video connections for Live Foto Bawah and Live Kamera Bawah
-            const liveFotoBawahVideo = document.getElementById('live-foto-bawah-video');
-            const liveKameraBawahVideo = document.getElementById('live-kamera-bawah-video');
-            
-            // Status indicators
-            const liveFotoBawahStatus = document.getElementById('live-foto-bawah-status');
-            const liveKameraBawahStatus = document.getElementById('live-kamera-bawah-status');
-            
-            // Placeholder elements
-            const liveFotoBawahPlaceholder = document.getElementById('live-foto-bawah-placeholder');
-            const liveKameraBawahPlaceholder = document.getElementById('live-kamera-bawah-placeholder');
-            
-            // Simulate video connections with different delays
-            simulateVideoConnection(liveFotoBawahVideo, liveFotoBawahStatus, liveFotoBawahPlaceholder, 2000);
-            simulateVideoConnection(liveKameraBawahVideo, liveKameraBawahStatus, liveKameraBawahPlaceholder, 3500);
-        }
-        
-        function simulateVideoConnection(videoElement, statusElement, placeholderElement, delay) {
-            // Status awal: Menyambungkan
-            statusElement.className = 'stream-status status-connecting';
-            statusElement.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i> Menyambungkan';
-            
-            // Simulasi koneksi setelah delay tertentu
-            setTimeout(() => {
-                // 80% kemungkinan berhasil terhubung, 20% gagal (untuk simulasi)
-                if (Math.random() > 0.2) {
-                    // Berhasil terhubung
-                    statusElement.className = 'stream-status status-live';
-                    statusElement.innerHTML = '<i class="fas fa-circle mr-1"></i> LIVE';
-                    placeholderElement.style.display = 'none';
-                    
-                    // Untuk demo, gunakan video placeholder
-                    // Dalam aplikasi nyata, ganti dengan: videoElement.src = 'URL_STREAMING_KAMERA';
-                    videoElement.src = 'https://assets.mixkit.co/videos/preview/mixkit-aerial-view-of-a-sailboat-in-the-sea-34560-large.mp4';
-                    videoElement.loop = true;
-                    videoElement.play().catch(e => console.log('Autoplay prevented:', e));
-                } else {
-                    // Gagal terhubung
-                    statusElement.className = 'stream-status status-offline';
-                    statusElement.innerHTML = '<i class="fas fa-exclamation-triangle mr-1"></i> Offline';
-                    placeholderElement.style.display = 'flex';
-                }
-            }, delay);
-        }
-
-        // Event listeners untuk sidebar navigation
-        document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('dashboard-btn').addEventListener('click', () => showPage('dashboard-page'));
-            document.getElementById('daftar-foto-btn').addEventListener('click', () => showPage('daftar-foto-page'));
-            document.getElementById('refresh-data-btn').addEventListener('click', refreshDashboardData);
-            document.getElementById('mulai-btn').addEventListener('click', () => console.log("Tombol Mulai diklik!"));
-            
-            // Restart button and popup handlers
-            document.getElementById('restart-btn').addEventListener('click', showRestartPopup);
-            document.getElementById('restart-confirm-yes').addEventListener('click', handleRestartConfirm);
-            document.getElementById('restart-confirm-no').addEventListener('click', handleRestartCancel);
-
-            // Add event listeners for trajectory mode radio buttons
-            document.querySelectorAll('input[name="trajectory_mode"]').forEach(radio => {
-                radio.addEventListener('change', function() {
-                    document.getElementById('lintasan-ab-header').textContent = `Lintasan ${this.value}`;
-                });
-            });
-
-            // Setup video streams
-            setupVideoStreams();
-
-            // Show dashboard by default on load
-            showPage('dashboard-page');
-            refreshDashboardData(); // Call once on load to populate initial dynamic data
+        const photos = resp.photos || [];
+        photos.forEach(p => {
+            const entry = document.createElement('div');
+            entry.className = "w-full bg-white rounded-lg p-6 shadow-lg flex items-center mb-8";
+            entry.innerHTML = `
+                <div class="flex-1">
+                    <p class="text-black text-2xl font-normal font-['Inter'] mb-2"><span class="font-bold">Nama :</span> ${p.name}</p>
+                    <p class="text-black text-2xl font-normal font-['Inter'] mb-2"><span class="font-bold">Waktu :</span> ${p.time}</p>
+                    <p class="text-black text-2xl font-normal font-['Inter'] mb-4"><span class="font-bold">Tanggal :</span> ${p.date}</p>
+                    <a class="bg-blue-600 text-white py-2 px-6 rounded-lg font-bold hover:bg-blue-700 transition-colors" href="${p.download_url}" target="_blank" rel="noopener">Download</a>
+                </div>
+                <div class="w-64 h-48 bg-gray-300 rounded-lg flex-shrink-0 ml-8"></div>
+            `;
+            container.appendChild(entry);
         });
+    } catch (err) {
+        console.error("fetchPhotoList error:", err);
+    }
+}
 
-        // Panggil fungsi scaleContent saat halaman dimuat dan saat ukuran jendela diubah
-        window.addEventListener('resize', scaleContent);
-        window.addEventListener('load', scaleContent);
+/* === Ambil URL video dari server dan attach ke elemen <video> (tidak modifikasi CSS) === */
+async function setupVideoStreams() {
+    try {
+        const urls = await fetchJson(`${API_BASE}/video_urls`);
+        if (!urls) return;
 
-        // Panggil juga sekali secara langsung untuk memastikan skala diterapkan pada pemuatan awal
-        scaleContent();
+        const liveFotoBawahVideo = document.getElementById('live-foto-bawah-video');
+        const liveKameraBawahVideo = document.getElementById('live-kamera-bawah-video');
+        const liveFotoBawahStatus = document.getElementById('live-foto-bawah-status');
+        const liveKameraBawahStatus = document.getElementById('live-kamera-bawah-status');
+        const liveFotoBawahPlaceholder = document.getElementById('live-foto-bawah-placeholder');
+        const liveKameraBawahPlaceholder = document.getElementById('live-kamera-bawah-placeholder');
+
+        if (urls.live_foto_bawah && liveFotoBawahVideo) {
+            liveFotoBawahVideo.src = urls.live_foto_bawah;
+            liveFotoBawahVideo.loop = true;
+            liveFotoBawahVideo.muted = true; // mute to increase autoplay success chance
+            liveFotoBawahVideo.play().then(() => {
+                if (liveFotoBawahStatus) {
+                    liveFotoBawahStatus.className = 'stream-status status-live';
+                    liveFotoBawahStatus.innerHTML = '<i class="fas fa-circle mr-1"></i> LIVE';
+                }
+                if (liveFotoBawahPlaceholder) liveFotoBawahPlaceholder.style.display = 'none';
+            }).catch(e => {
+                if (liveFotoBawahStatus) {
+                    liveFotoBawahStatus.className = 'stream-status status-offline';
+                    liveFotoBawahStatus.innerHTML = '<i class="fas fa-exclamation-triangle mr-1"></i> Offline';
+                }
+                if (liveFotoBawahPlaceholder) liveFotoBawahPlaceholder.style.display = 'flex';
+                console.debug("liveFotoBawahVideo play error:", e);
+            });
+        }
+
+        if (urls.live_kamera_bawah && liveKameraBawahVideo) {
+            liveKameraBawahVideo.src = urls.live_kamera_bawah;
+            liveKameraBawahVideo.loop = true;
+            liveKameraBawahVideo.muted = true;
+            liveKameraBawahVideo.play().then(() => {
+                if (liveKameraBawahStatus) {
+                    liveKameraBawahStatus.className = 'stream-status status-live';
+                    liveKameraBawahStatus.innerHTML = '<i class="fas fa-circle mr-1"></i> LIVE';
+                }
+                if (liveKameraBawahPlaceholder) liveKameraBawahPlaceholder.style.display = 'none';
+            }).catch(e => {
+                if (liveKameraBawahStatus) {
+                    liveKameraBawahStatus.className = 'stream-status status-offline';
+                    liveKameraBawahStatus.innerHTML = '<i class="fas fa-exclamation-triangle mr-1"></i> Offline';
+                }
+                if (liveKameraBawahPlaceholder) liveKameraBawahPlaceholder.style.display = 'flex';
+                console.debug("liveKameraBawahVideo play error:", e);
+            });
+        }
+
+    } catch (err) {
+        console.error("setupVideoStreams error:", err);
+    }
+}
+
+/* === Restart API call === */
+async function apiRestart() {
+    try {
+        const selectedMode = document.querySelector('input[name="trajectory_mode"]:checked')?.value || null;
+        await fetchJson(`${API_BASE}/restart`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: selectedMode })
+        }, 7000);
+        // After restart, refresh dashboard once
+        await fetchDashboardData();
+    } catch (err) {
+        console.error("apiRestart error:", err);
+    }
+}
+
+/* === Event wiring: gunakan handlers asli, hanya mengganti fungsi data dengan fetch-based === */
+document.addEventListener('DOMContentLoaded', () => {
+    // Sidebar buttons
+    const dashboardBtn = document.getElementById('dashboard-btn');
+    const daftarFotoBtn = document.getElementById('daftar-foto-btn');
+    if (dashboardBtn) dashboardBtn.addEventListener('click', () => {
+        showPage('dashboard-page');
+    });
+    if (daftarFotoBtn) daftarFotoBtn.addEventListener('click', () => {
+        showPage('daftar-foto-page');
+        fetchPhotoList();
+    });
+
+    // Buttons
+    const refreshBtn = document.getElementById('refresh-data-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', fetchDashboardData);
+
+    const mulaiBtn = document.getElementById('mulai-btn');
+    if (mulaiBtn) mulaiBtn.addEventListener('click', () => console.log("Tombol Mulai diklik!"));
+
+    // Restart popup wiring
+    const restartBtn = document.getElementById('restart-btn');
+    const restartConfirmYes = document.getElementById('restart-confirm-yes');
+    const restartConfirmNo = document.getElementById('restart-confirm-no');
+    if (restartBtn) {
+        restartBtn.addEventListener('click', () => {
+            const popupMessage = document.getElementById('restart-popup-message');
+            const selectedMode = document.querySelector('input[name="trajectory_mode"]:checked')?.value || 'A';
+            if (popupMessage) popupMessage.textContent = `Apakah anda yakin ingin memulai dari awal di mode lintasan ${selectedMode}?`;
+            document.getElementById('restart-popup-overlay')?.classList.add('visible');
+        });
+    }
+    if (restartConfirmYes) {
+        restartConfirmYes.addEventListener('click', async () => {
+            await apiRestart();
+            document.getElementById('restart-popup-overlay')?.classList.remove('visible');
+        });
+    }
+    if (restartConfirmNo) {
+        restartConfirmNo.addEventListener('click', () => {
+            document.getElementById('restart-popup-overlay')?.classList.remove('visible');
+        });
+    }
+
+    // Trajectory radio update header (ASLI)
+    document.querySelectorAll('input[name="trajectory_mode"]').forEach(radio => {
+        radio.addEventListener('change', function() {
+            document.getElementById('lintasan-ab-header').textContent = `Lintasan ${this.value}`;
+        });
+    });
+
+
+    startPingLoop();
+
+    // Initial actions (preserve layout scaling behavior)
+    showPage('dashboard-page');
+    fetchDashboardData();
+    setupVideoStreams();
+    // Polling dashboard
+    setInterval(fetchDashboardData, DASHBOARD_POLL_MS);
+});
+
+/* === Keep scaleContent listeners === */
+window.addEventListener('resize', scaleContent);
+window.addEventListener('load', scaleContent);
+/* apply once immediately (original behaviour) */
+scaleContent();
     </script>
 </body>
 </html>

@@ -1,18 +1,22 @@
+// rtsp_manager.go
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/blackjack/webcam"
 )
 
 type CameraInfo struct {
@@ -20,251 +24,255 @@ type CameraInfo struct {
 	Product string `json:"product"`
 }
 
-type CameraStream struct {
-	devicePath string
-	product    string
-	cam        *webcam.Webcam
-	running    bool
-	mutex      sync.RWMutex
-	lastFrame  []byte
+type CameraProcess struct {
+	info       CameraInfo
+	rtspPath   string
+	cmd        *exec.Cmd
+	startedAt  time.Time
+	mutex      sync.Mutex
+	restarts   int
+	cancelFunc context.CancelFunc
 }
 
-type StreamingServer struct {
-	cameras    [2]*CameraStream
-	httpServer *http.Server
+type Manager struct {
+	cameras map[int]*CameraProcess
+	lock    sync.Mutex
 }
 
-func NewCameraStream(devicePath, product string) *CameraStream {
-	return &CameraStream{
-		devicePath: devicePath,
-		product:    product,
-		running:    false,
+func NewManager(cameraList []CameraInfo) *Manager {
+	m := &Manager{
+		cameras: make(map[int]*CameraProcess),
 	}
-}
-
-func (cs *CameraStream) Initialize() error {
-	log.Printf("Initializing camera: %s (%s)", cs.devicePath, cs.product)
-	
-	cam, err := webcam.Open(cs.devicePath)
-	if err != nil {
-		return fmt.Errorf("failed to open camera %s: %v", cs.devicePath, err)
-	}
-	cs.cam = cam
-
-	// Try MJPEG first, then YUYV as fallback
-	_, _, _, err = cs.cam.SetImageFormat(webcam.PixelFormat(1196444237), 1280, 720) // MJPEG
-	if err != nil {
-		log.Printf("MJPEG not supported, trying YUYV: %v", err)
-		_, _, _, err = cs.cam.SetImageFormat(webcam.PixelFormat(1448695129), 1280, 720) // YUYV
-		if err != nil {
-			cam.Close()
-			return fmt.Errorf("failed to set image format: %v", err)
+	for i, cam := range cameraList {
+		rtspPath := fmt.Sprintf("rtsp://127.0.0.1:8554/cam%d", i)
+		m.cameras[i] = &CameraProcess{
+			info:     cam,
+			rtspPath: rtspPath,
 		}
 	}
+	return m
+}
 
-	// Set FPS
-	cs.cam.SetFramerate(30.0)
-
-	// Start streaming
-	err = cs.cam.StartStreaming()
-	if err != nil {
-		cam.Close()
-		return err
+// StartCamera will spawn a gst-rtsp-server test-launch process for the given camera index.
+// It uses Jetson hardware encoder nvv4l2h264enc in the pipeline.
+func (m *Manager) StartCamera(idx int) error {
+	m.lock.Lock()
+	cp, ok := m.cameras[idx]
+	m.lock.Unlock()
+	if !ok {
+		return fmt.Errorf("camera %d not found", idx)
 	}
 
-	cs.running = true
-	log.Printf("Camera %s initialized successfully: 1280x720 @ 30fps", cs.devicePath)
+	cp.mutex.Lock()
+	defer cp.mutex.Unlock()
+
+	if cp.cmd != nil {
+		return fmt.Errorf("camera %d already started", idx)
+	}
+
+	// Build GStreamer pipeline string. Adjust width/height/framerate/bitrate as needed.
+	// If you use CSI camera (nvarguscamerasrc), change the src element accordingly.
+	pipeline := fmt.Sprintf("( v4l2src device=%s ! video/x-raw,width=1280,height=720,framerate=30/1 ! nvvidconv ! 'video/x-raw(memory:NVMM),format=NV12' ! nvv4l2h264enc bitrate=2000000 ! h264parse ! rtph264pay name=pay0 pt=96 )", cp.info.Device)
+
+	// test-launch is the sample binary from gst-rtsp-server repo that runs a pipeline as RTSP server.
+	// If you don't have test-launch, install gst-rtsp-server or change this to another method.
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(ctx, "test-launch", pipeline)
+	// send stdout/stderr to files for debugging
+	logDir := "./logs"
+	os.MkdirAll(logDir, 0755)
+	stdoutFile, _ := os.OpenFile(filepath.Join(logDir, fmt.Sprintf("cam%d_stdout.log", idx)), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	stderrFile, _ := os.OpenFile(filepath.Join(logDir, fmt.Sprintf("cam%d_stderr.log", idx)), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	cmd.Stdout = stdoutFile
+	cmd.Stderr = stderrFile
+
+	// Start the process
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return fmt.Errorf("failed to start test-launch for camera %d: %w", idx, err)
+	}
+
+	cp.cmd = cmd
+	cp.cancelFunc = cancel
+	cp.startedAt = time.Now()
+	cp.restarts = 0
+
+	// Monitor in goroutine: wait for exit and cleanup
+	go func(index int, p *CameraProcess, stdout, stderr *os.File) {
+		err := cmd.Wait()
+		stdout.Close()
+		stderr.Close()
+		p.mutex.Lock()
+		p.cmd = nil
+		if p.cancelFunc != nil {
+			p.cancelFunc()
+			p.cancelFunc = nil
+		}
+		p.mutex.Unlock()
+		if err != nil {
+			log.Printf("camera %d process exited with error: %v (logs: %s, %s)", index, err, stdout.Name(), stderr.Name())
+		} else {
+			log.Printf("camera %d process exited cleanly", index)
+		}
+	}(idx, cp, stdoutFile, stderrFile)
+
+	// Small sleep to let RTSP server up (could poll the RTSP URL in production)
+	time.Sleep(400 * time.Millisecond)
+
+	log.Printf("Started camera %d -> %s (pipeline: %s)", idx, cp.rtspPath, pipeline)
 	return nil
 }
 
-func (cs *CameraStream) StartCapture() {
+func (m *Manager) StopCamera(idx int) error {
+	m.lock.Lock()
+	cp, ok := m.cameras[idx]
+	m.lock.Unlock()
+	if !ok {
+		return fmt.Errorf("camera %d not found", idx)
+	}
+
+	cp.mutex.Lock()
+	defer cp.mutex.Unlock()
+
+	if cp.cmd == nil {
+		return fmt.Errorf("camera %d not running", idx)
+	}
+
+	// Graceful shutdown via cancel func
+	if cp.cancelFunc != nil {
+		cp.cancelFunc()
+	}
+
+	// give it a short time, then kill
+	done := make(chan struct{})
 	go func() {
-		for cs.running {
-			err := cs.cam.WaitForFrame(5)
-			if err != nil {
-				continue
-			}
-
-			frame, err := cs.cam.ReadFrame()
-			if err == nil && len(frame) > 0 {
-				cs.mutex.Lock()
-				cs.lastFrame = frame
-				cs.mutex.Unlock()
-			}
-		}
+		cp.cmd.Wait()
+		close(done)
 	}()
-}
 
-func (cs *CameraStream) GetFrame() []byte {
-	cs.mutex.RLock()
-	defer cs.mutex.RUnlock()
-	return cs.lastFrame
-}
-
-func (cs *CameraStream) Close() {
-	cs.running = false
-	if cs.cam != nil {
-		cs.cam.StopStreaming()
-		cs.cam.Close()
-	}
-}
-
-func NewStreamingServer(cameraList []CameraInfo) *StreamingServer {
-	server := &StreamingServer{}
-
-	// Initialize cameras
-	for i, camera := range cameraList {
-		if i >= 2 {
-			break
-		}
-
-		stream := NewCameraStream(camera.Device, camera.Product)
-		err := stream.Initialize()
-		if err != nil {
-			log.Printf("Failed to initialize camera %s: %v", camera.Device, err)
-			continue
-		}
-		server.cameras[i] = stream
-		stream.StartCapture()
-		time.Sleep(500 * time.Millisecond) // Stagger initialization
-	}
-
-	return server
-}
-
-func (ss *StreamingServer) GenerateMJPEG(cameraID int) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if cameraID < 0 || cameraID >= len(ss.cameras) || ss.cameras[cameraID] == nil {
-			http.Error(c.Writer, "Camera not found", http.StatusNotFound)
-			return
-		}
-
-		c.Writer.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-		c.Writer.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-		c.Writer.Header().Set("Pragma", "no-cache")
-		c.Writer.Header().Set("Expires", "0")
-
-		camera := ss.cameras[cameraID]
-		frameInterval := time.Second / 30 // 30 FPS
-		ticker := time.NewTicker(frameInterval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-c.Request.Context().Done():
-				return
-			case <-ticker.C:
-				frame := camera.GetFrame()
-				if frame != nil {
-					c.Writer.Write([]byte("--frame\r\nContent-Type: image/jpeg\r\n\r\n"))
-					c.Writer.Write(frame)
-					c.Writer.Write([]byte("\r\n\r\n"))
-				}
-			}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		if cp.cmd.Process != nil {
+			cp.cmd.Process.Kill()
 		}
 	}
+
+	cp.cmd = nil
+	cp.cancelFunc = nil
+	log.Printf("Stopped camera %d", idx)
+	return nil
 }
 
-func (ss *StreamingServer) SetupRoutes() *gin.Engine {
-	gin.SetMode(gin.ReleaseMode)
-	router := gin.New()
-	router.Use(gin.Recovery())
-
-	// Root endpoint
-	router.GET("/", func(c *gin.Context) {
-		cameraInfo := make([]gin.H, 0)
-		for i, cam := range ss.cameras {
-			if cam != nil {
-				cameraInfo = append(cameraInfo, gin.H{
-					"camera_id": i,
-					"device":    cam.devicePath,
-					"product":   cam.product,
-				})
-			}
-		}
-
-		c.JSON(200, gin.H{
-			"message": "USB Camera Streaming Server",
-			"cameras": cameraInfo,
+func (m *Manager) Status() []gin.H {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	out := make([]gin.H, 0, len(m.cameras))
+	for i, cp := range m.cameras {
+		cp.mutex.Lock()
+		running := cp.cmd != nil
+		startAt := cp.startedAt
+		cp.mutex.Unlock()
+		out = append(out, gin.H{
+			"id":       i,
+			"device":   cp.info.Device,
+			"product":  cp.info.Product,
+			"rtsp":     cp.rtspPath,
+			"running":  running,
+			"started":  startAt.Format(time.RFC3339),
 		})
-	})
-
-	// Streaming endpoints
-	router.GET("/camera/0", ss.GenerateMJPEG(0))
-	router.GET("/camera/1", ss.GenerateMJPEG(1))
-
-	return router
-}
-
-func (ss *StreamingServer) Start(addr string) error {
-	router := ss.SetupRoutes()
-
-	ss.httpServer = &http.Server{
-		Addr:    addr,
-		Handler: router,
 	}
-
-	log.Printf("Starting streaming server on %s", addr)
-	return ss.httpServer.ListenAndServe()
-}
-
-func (ss *StreamingServer) Shutdown() {
-	log.Println("Shutting down streaming server...")
-	for i, camera := range ss.cameras {
-		if camera != nil {
-			log.Printf("Closing camera %d (%s)...", i, camera.devicePath)
-			camera.Close()
-		}
-	}
-
-	if ss.httpServer != nil {
-		ss.httpServer.Close()
-	}
+	return out
 }
 
 func main() {
-	// Check if camera list is provided as argument
-	if len(os.Args) < 2 {
-		log.Fatal("Usage: ./dual-camera-streamer '<camera_json_array>'")
+	// Example: read camera list JSON from env or args; for simplicity we hardcode two cameras here.
+	// Replace this with parsing os.Args or config file as you originally had.
+	cameraList := []CameraInfo{
+		{Device: "/dev/video0", Product: "usbcam0"},
+		{Device: "/dev/video1", Product: "usbcam1"},
 	}
 
-	// Parse camera list from command line argument
-	var cameras []CameraInfo
-	err := json.Unmarshal([]byte(os.Args[1]), &cameras)
-	if err != nil {
-		log.Fatalf("Failed to parse camera list: %v", err)
+	manager := NewManager(cameraList)
+
+	// Optionally: auto-start all cameras at boot
+	for i := range cameraList {
+		if err := manager.StartCamera(i); err != nil {
+			log.Printf("warning: failed to autostart camera %d: %v", i, err)
+		}
 	}
 
-	if len(cameras) == 0 {
-		log.Fatal("No cameras provided")
+	// Setup HTTP control server
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+	r.Use(gin.Recovery())
+
+	r.GET("/", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"message": "RTSP Manager",
+			"cameras": manager.Status(),
+		})
+	})
+
+	r.POST("/start/:id", func(c *gin.Context) {
+		idStr := c.Param("id")
+		id, _ := strconv.Atoi(idStr)
+		if err := manager.StartCamera(id); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"status": "started", "id": id, "rtsp": manager.cameras[id].rtspPath})
+	})
+
+	r.POST("/stop/:id", func(c *gin.Context) {
+		idStr := c.Param("id")
+		id, _ := strconv.Atoi(idStr)
+		if err := manager.StopCamera(id); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"status": "stopped", "id": id})
+	})
+
+	r.GET("/rtsp/:id", func(c *gin.Context) {
+		idStr := c.Param("id")
+		id, _ := strconv.Atoi(idStr)
+		manager.lock.Lock()
+		cp, ok := manager.cameras[id]
+		manager.lock.Unlock()
+		if !ok {
+			c.JSON(404, gin.H{"error": "not found"})
+			return
+		}
+		c.JSON(200, gin.H{"rtsp": cp.rtspPath})
+	})
+
+	// start HTTP server
+	httpSrv := &http.Server{
+		Addr:    ":8100",
+		Handler: r,
 	}
 
-	log.Printf("Loaded %d cameras from command line", len(cameras))
-	for i, cam := range cameras {
-		log.Printf("Camera %d: %s (%s)", i, cam.Device, cam.Product)
-	}
-
-	// Setup signal handling
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-
-	server := NewStreamingServer(cameras)
-
-	// Start server
 	go func() {
-		if err := server.Start(":8100"); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+		log.Printf("HTTP control server listening on %s", httpSrv.Addr)
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("http server err: %v", err)
 		}
 	}()
 
-	log.Println("Server started on :8100")
-	log.Println("Endpoints:")
-	log.Println("  GET /         - Server info") 
-	log.Println("  GET /camera/0 - Stream camera 0")
-	log.Println("  GET /camera/1 - Stream camera 1")
-
-	// Wait for shutdown signal
+	// Handle shutdown signals
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	<-sigs
-	server.Shutdown()
-	log.Println("Server shutdown complete")
+	log.Println("shutting down...")
+
+	// Stop cameras
+	for i := range cameraList {
+		_ = manager.StopCamera(i)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	httpSrv.Shutdown(ctx)
+	log.Println("bye")
 }
